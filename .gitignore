@@ -1,37 +1,17 @@
 __pycache__/
-*.py[cod]
+*.pyc
+*.pyo
+.env
 *.egg-info/
 dist/
 build/
-.venv/
 venv/
-*.egg
-.eggs/
-
-# Config with secrets
-config.yaml
-
-# Voice files (can be large)
-voices/*.wav
-voices/*.mp3
-voices/*.flac
-voices/catalog.json
-!voices/.gitkeep
-
-# Test outputs
-test_output_*.mp3
-test_output_*.wav
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-
-# OS
+.venv/
+models/
+*.wav
+*.mp3
+*.ogg
 .DS_Store
-Thumbs.db
-
-# Model cache
-*.bin
-*.safetensors
+*.log
+voices/*
+!voices/.gitkeep
