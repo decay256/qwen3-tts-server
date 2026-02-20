@@ -1,0 +1,58 @@
+# Qwen3-TTS Server Configuration
+# Copy this to config.yaml and fill in your values
+
+# Shared API key for authentication (generate with: python -m scripts.generate_keys)
+api_key: "CHANGE_ME"
+
+# Remote relay server (OpenClaw droplet)
+remote:
+  host: "104.248.27.154"
+  port: 9800
+  # Set to true to require TLS (recommended for production)
+  tls: false
+  # Path to CA cert if using self-signed certs
+  ca_cert: null
+
+# Local GPU server settings
+local:
+  # Where to store models
+  model_cache_dir: "~/.cache/qwen3-tts"
+  # Where to store cloned voices
+  voices_dir: "./voices"
+  # Device to use (cuda, cpu)
+  device: "cuda"
+  # Models to load on startup
+  models:
+    base: "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
+    voice_design: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
+  # Max text length per chunk (characters)
+  max_chunk_length: 500
+  # Audio output format defaults
+  default_format: "mp3"
+  default_sample_rate: 24000
+
+# Voice cast mapping (for audiobook production)
+voice_cast:
+  Narrator:
+    type: "designed"
+    description: "Deep, warm male narrator voice with gravitas and clarity"
+  Maya:
+    type: "designed"
+    description: "Young woman, warm and expressive, slight vulnerability"
+  Elena:
+    type: "designed"
+    description: "Mature woman, confident and authoritative, Eastern European accent"
+  Chen:
+    type: "designed"
+    description: "Middle-aged man, calm and analytical, slight Chinese accent"
+  Raj:
+    type: "designed"
+    description: "Young man, enthusiastic and energetic, Indian accent"
+  Kim:
+    type: "designed"
+    description: "Young woman, sharp and professional, Korean-American"
+
+# Logging
+logging:
+  level: "INFO"
+  file: null  # Set to a path to log to file

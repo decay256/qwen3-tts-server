@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.backends._legacy:_Backend"
+
+[project]
+name = "qwen3-tts-server"
+version = "0.1.0"
+description = "Local GPU TTS server with secure remote access for Qwen3-TTS"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "Daniel", email = "daniel@decay256.com"}]
+
+dependencies = [
+    "torch>=2.1.0",
+    "transformers>=4.40.0",
+    "accelerate>=0.27.0",
+    "soundfile>=0.12.0",
+    "aiohttp>=3.9.0",
+    "websockets>=12.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.5.0",
+    "numpy>=1.24.0",
+    "pydub>=0.25.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "pytest-asyncio", "black", "ruff", "mypy"]
+flash-attn = ["flash-attn>=2.5.0"]
+
+[project.scripts]
+qwen3-tts-local = "server.local_server:main"
+qwen3-tts-relay = "server.remote_relay:main"
+qwen3-tts-keygen = "scripts.generate_keys:main"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
