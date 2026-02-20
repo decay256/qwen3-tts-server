@@ -1,141 +1,188 @@
 # Qwen3-TTS Server
 
-Local GPU TTS rendering server with secure remote access. Runs Qwen3-TTS models on your RTX 4090 and exposes them to a remote server (e.g., OpenClaw) via a secure WebSocket reverse tunnel.
+Local GPU TTS server with secure remote access for [Qwen3-TTS](https://huggingface.co/Qwen/Qwen3-TTS-12Hz-1.7B-Base).
+
+Run Qwen3-TTS on your local GPU (RTX 4090) and control it remotely from anywhere via a secure WebSocket tunnel.
 
 ## Architecture
 
 ```
-┌─────────────────────┐         WSS Tunnel          ┌──────────────────────┐
-│  Your Machine (GPU) │ ──────────────────────────▶  │  Remote Server       │
-│                     │                              │  (OpenClaw/VPS)      │
-│  • Qwen3-TTS 1.7B  │  ◀── TTS requests ────────  │                      │
-│  • RTX 4090 24GB    │  ──── Audio responses ────▶  │  • Bridge HTTP API   │
-│  • Voice cloning    │                              │  • Auth + Rate limit │
-└─────────────────────┘                              └──────────────────────┘
+┌─────────────────────┐         WebSocket Tunnel         ┌──────────────────────┐
+│   Local GPU Machine │ ──────────────────────────────▶  │   Remote Relay       │
+│                     │  (outbound connection, no open   │   (OpenClaw droplet) │
+│  • Qwen3-TTS models│   ports on local machine)        │                      │
+│  • RTX 4090 24GB   │                                  │  • REST API          │
+│  • Voice cloning    │  ◀─── TTS requests ────          │  • Auth gateway      │
+│  • Voice design     │  ──── Audio responses ──▶        │  • WebSocket hub     │
+└─────────────────────┘                                  └──────────────────────┘
+                                                                   ▲
+                                                                   │ HTTPS
+                                                                   │
+                                                          ┌────────┴───────┐
+                                                          │  API Clients   │
+                                                          │  (OpenClaw,    │
+                                                          │   scripts,     │
+                                                          │   etc.)        │
+                                                          └────────────────┘
 ```
 
-**Key design:** Your GPU machine connects *outbound* — no port forwarding, no firewall changes needed.
+## Features
 
-## Requirements
-
-- **GPU machine:** NVIDIA GPU with 6+ GB VRAM (RTX 4090 recommended), Python 3.10+, CUDA 12+
-- **Remote server:** Any Linux server with a public IP, Python 3.10+
+- **Voice Cloning**: Clone any voice from a reference audio sample
+- **Voice Design**: Create voices from text descriptions ("deep warm male narrator")
+- **Secure Tunnel**: Local machine connects out — no ports to open, no firewall changes
+- **API Key Auth**: All endpoints protected with shared secret
+- **Auto-reconnect**: Tunnel reconnects automatically with exponential backoff
+- **Streaming**: Support for chunked audio streaming for long texts
+- **Audiobook Voice Cast**: Pre-configured voices for Narrator, Maya, Elena, Chen, Raj, Kim
 
 ## Quick Start
 
-### 1. GPU Machine Setup
+### 1. Clone the repo
 
 ```bash
-git clone https://github.com/dkondermann/qwen3-tts-server.git
+git clone https://github.com/decay256/qwen3-tts-server.git
 cd qwen3-tts-server
-./scripts/setup.sh
 ```
 
-This will:
-- Create a Python virtual environment
-- Install PyTorch with CUDA support
-- Install all dependencies
-- Download Qwen3-TTS models (~4GB)
-- Generate an auth token
-
-### 2. Configure
+### 2. Generate API keys
 
 ```bash
-cp config.example.yaml config.yaml
-# Edit config.yaml — set your remote server IP and the generated auth token
+pip install pyyaml
+python -m scripts.generate_keys
 ```
 
-### 3. Start the Bridge (on remote server)
+This creates `config.yaml` with a fresh API key. Copy it to both machines.
+
+### 3. Setup local GPU machine
+
+**Linux/WSL:**
+```bash
+chmod +x scripts/setup_local.sh
+./scripts/setup_local.sh
+```
+
+**Windows PowerShell:**
+```powershell
+.\scripts\setup_local.ps1
+```
+
+### 4. Start the remote relay (on your server)
 
 ```bash
-pip install websockets aiohttp python-dotenv
-export AUTH_TOKEN="your-token-here"
-python -m bridge.server
+pip install -e .
+python -m server.remote_relay
 ```
 
-### 4. Start the Local Server (on GPU machine)
+### 5. Start the local server (on your GPU machine)
 
 ```bash
-source .venv/bin/activate
-python -m server.main
+python -m server.local_server
 ```
 
-The local server will:
-1. Load Qwen3-TTS models onto your GPU
-2. Connect to the remote bridge via WebSocket
-3. Wait for TTS requests
+It connects to the remote relay automatically.
 
-## API
+### 6. Test
 
-Once both sides are running, the bridge exposes an HTTP API on the remote server:
-
-### Generate Speech
 ```bash
-curl -X POST http://localhost:8766/api/tts/generate \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "Elena opened a new log entry and began to type.",
-    "voice": "Narrator",
-    "output_format": "mp3"
-  }' --output speech.mp3
+python -m scripts.test_voices
 ```
 
-### Voice Design (create voice from description)
-```bash
-curl -X POST http://localhost:8766/api/tts/generate \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "text": "The ice had been dark for four million years.",
-    "voice_config": {
-      "description": "Deep male voice, warm storyteller quality, slight gravitas"
-    },
-    "output_format": "mp3"
-  }' --output narration.mp3
+## API Endpoints
+
+All endpoints require `Authorization: Bearer <api_key>` header.
+
+### `GET /api/v1/status`
+Server status, GPU info, loaded models.
+
+### `GET /api/v1/tts/voices`
+List available voices.
+
+### `POST /api/v1/tts/synthesize`
+```json
+{
+  "text": "Hello world!",
+  "voice_id": "Narrator",
+  "instructions": "speak slowly with gravitas",
+  "format": "mp3"
+}
+```
+Returns audio file.
+
+### `POST /api/v1/tts/clone`
+Multipart: `reference_audio` (file) + `voice_name` (string).
+Returns new voice info.
+
+### `POST /api/v1/tts/design`
+```json
+{
+  "description": "Deep warm male narrator voice",
+  "name": "MyNarrator"
+}
+```
+Returns new voice info.
+
+## Python Client
+
+```python
+from client.tts_client import TTSClient
+
+async with TTSClient("http://your-server:9800", "your-api-key") as client:
+    # List voices
+    voices = await client.list_voices()
+
+    # Synthesize
+    result = await client.synthesize("Hello!", voice_id="Narrator")
+    result.save("output.mp3")
+
+    # Clone a voice
+    voice = await client.clone_voice("reference.wav", "MyVoice")
+
+    # Design a voice
+    voice = await client.design_voice("Cheerful young woman")
 ```
 
-### Voice Cloning (3-second sample)
-```bash
-curl -X POST http://localhost:8766/api/tts/clone \
-  -H "Authorization: Bearer YOUR_TOKEN" \
-  -F "name=custom_narrator" \
-  -F "reference_audio=@sample.wav"
-```
+## Configuration
 
-### Health Check
-```bash
-curl http://localhost:8766/api/tts/health \
-  -H "Authorization: Bearer YOUR_TOKEN"
-```
+See `config.example.yaml` for all options. Key settings:
 
-## Voice Cast (The Deep Echoes)
+| Setting | Description |
+|---------|-------------|
+| `api_key` | Shared secret for auth |
+| `remote.host` | Relay server IP/hostname |
+| `remote.port` | Relay server port (default: 9800) |
+| `remote.tls` | Enable TLS (recommended for production) |
+| `local.device` | `cuda` or `cpu` |
+| `local.models.base` | Base TTS model ID |
+| `local.models.voice_design` | Voice design model ID |
+| `voice_cast` | Pre-configured voice descriptions |
 
-Pre-configured voices for audiobook production in `config.example.yaml`:
+## Voice Cast (Audiobook)
 
-| Character | Voice Type | Description |
-|-----------|-----------|-------------|
-| Narrator | Designed | Deep, warm male with gravitas |
-| Maya | Designed | Young woman, warm, slight vulnerability |
-| Elena | Designed | Mature woman, authoritative |
-| Chen | Designed | Middle-aged man, calm, analytical |
-| Raj | Designed | Young man, enthusiastic, energetic |
-| Kim | Designed | Young woman, sharp, professional |
+Pre-configured voices for audiobook production:
 
-## Models
-
-| Model | Params | VRAM | Use Case |
-|-------|--------|------|----------|
-| Qwen3-TTS-1.7B-VoiceDesign | 1.7B | ~6GB | Create voices from descriptions |
-| Qwen3-TTS-1.7B-Base | 1.7B | ~6GB | Voice cloning from audio samples |
-| Qwen3-TTS-0.6B-Base | 0.6B | ~4GB | Faster inference, lower quality |
+| Character | Description |
+|-----------|-------------|
+| Narrator | Deep, warm male with gravitas |
+| Maya | Young woman, warm and expressive |
+| Elena | Mature woman, confident, Eastern European |
+| Chen | Middle-aged man, calm, analytical |
+| Raj | Young man, enthusiastic, energetic |
+| Kim | Young woman, sharp, professional |
 
 ## Security
 
-- Pre-shared auth token for all API calls
-- WebSocket tunnel supports TLS (WSS)
-- No inbound ports required on GPU machine
-- Rate limiting on bridge (default: 30 req/min)
+- **API key auth** on all endpoints (constant-time comparison)
+- **No open ports** on local machine (outbound WebSocket only)
+- **TLS support** for encrypted tunnel communication
+- **Heartbeat** keeps tunnel alive, auto-reconnects on failure
+
+## Requirements
+
+- Python 3.10+
+- NVIDIA GPU with 12GB+ VRAM (RTX 4090 recommended)
+- CUDA 12.1+
+- ~8GB disk for models
 
 ## License
 

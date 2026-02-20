@@ -55,5 +55,6 @@ MODEL_HF_IDS: dict[str, str] = {
     "voice_design": "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign",
     "custom_voice": "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
     "base": "Qwen/Qwen3-TTS-12Hz-1.7B-Base",
+    "custom_voice_small": "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice",
     "base_small": "Qwen/Qwen3-TTS-12Hz-0.6B-Base",
 }

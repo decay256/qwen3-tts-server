@@ -15,7 +15,7 @@ import websockets
 from websockets.client import WebSocketClientProtocol
 from websockets.server import WebSocketServerProtocol
 
-from server.auth import AuthManager, validate_api_key
+from server.auth import verify_token
 
 logger = logging.getLogger(__name__)
 
@@ -264,13 +264,8 @@ class TunnelServer:
     Accepts connections from local GPU machines and forwards API requests.
     """
 
-    def __init__(self, auth_manager: AuthManager) -> None:
-        """Initialize tunnel server.
-
-        Args:
-            auth_manager: Authentication manager for validating connections.
-        """
-        self.auth_manager = auth_manager
+    def __init__(self) -> None:
+        """Initialize tunnel server."""
         self._clients: dict[str, WebSocketServerProtocol] = {}
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._client_counter = 0
@@ -301,7 +296,7 @@ class TunnelServer:
                 await websocket.close(4001, "Expected auth message")
                 return
 
-            if not self.auth_manager.authenticate_websocket(msg.body or ""):
+            if not verify_token(msg.body or ""):
                 fail = TunnelMessage(type=MessageType.AUTH_FAIL, error="Invalid API key")
                 await websocket.send(fail.to_json())
                 await websocket.close(4003, "Authentication failed")

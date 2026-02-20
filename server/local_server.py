@@ -18,9 +18,9 @@ from typing import Optional
 
 import yaml
 
-from server.tts_engine import TTSEngine, VoiceProfile
+from server.tts_engine import TTSEngine
 from server.tunnel import MessageType, TunnelClient, TunnelMessage
-from server.voice_manager import VoiceManager
+from server.voice_manager import VoiceManager, VoiceProfile
 
 logger = logging.getLogger(__name__)
 
@@ -81,15 +81,7 @@ class LocalServer:
         local_cfg = config.get("local", {})
 
         # Initialize TTS engine
-        models = local_cfg.get("models", {})
-        self.engine = TTSEngine(
-            base_model_id=models.get("base", "Qwen/Qwen3-TTS-12Hz-1.7B-Base"),
-            design_model_id=models.get("voice_design", "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"),
-            device=local_cfg.get("device", "cuda"),
-            cache_dir=os.path.expanduser(local_cfg.get("model_cache_dir", "~/.cache/qwen3-tts")),
-            max_chunk_length=local_cfg.get("max_chunk_length", 500),
-            sample_rate=local_cfg.get("default_sample_rate", 24000),
-        )
+        self.engine = TTSEngine()
 
         # Initialize voice manager
         voices_dir = local_cfg.get("voices_dir", "./voices")
@@ -138,7 +130,7 @@ class LocalServer:
         """Stop the server and clean up."""
         logger.info("Shutting down local server...")
         await self.tunnel.stop()
-        self.engine.unload_models()
+        # Models are freed when process exits
         logger.info("Server stopped")
 
     async def _handle_request(self, request: TunnelMessage) -> TunnelMessage:
@@ -182,15 +174,15 @@ class LocalServer:
 
     async def _handle_status(self, request: TunnelMessage) -> TunnelMessage:
         """Handle GET /api/v1/status."""
-        gpu_info = self.engine.get_gpu_info()
+        gpu_info = self.engine.get_health()
         uptime = time.time() - self.start_time
 
         status = {
             "status": "ok",
-            "gpu": gpu_info.get("gpu", "N/A"),
+            "gpu": gpu_info.get("gpu_name", "N/A"),
             "vram_used_gb": gpu_info.get("vram_used_gb", 0),
             "vram_total_gb": gpu_info.get("vram_total_gb", 0),
-            "models_loaded": self.engine.models_loaded,
+            "models_loaded": gpu_info.get("loaded_models", []),
             "voices_count": len(self.voice_manager.list_voices()),
             "uptime_seconds": round(uptime, 1),
             "engine_ready": self.engine.is_loaded,
@@ -256,19 +248,37 @@ class LocalServer:
 
         # Run synthesis in thread pool to avoid blocking
         loop = asyncio.get_event_loop()
-        result = await loop.run_in_executor(
-            None, self.engine.synthesize, text, voice, instructions, output_format
-        )
 
-        # Encode audio as base64
-        audio_b64 = base64.b64encode(result.audio_data).decode("ascii")
+        from .tts_engine import wav_to_format
+        import functools
+
+        if voice.voice_type == "designed":
+            func = functools.partial(
+                self.engine.generate_voice_design,
+                text=text, description=voice.description or "", language="Auto",
+            )
+        elif voice.voice_type == "cloned" and voice.reference_audio:
+            with open(voice.reference_audio, "rb") as f:
+                ref_b64 = base64.b64encode(f.read()).decode()
+            func = functools.partial(
+                self.engine.generate_voice_clone,
+                text=text, ref_audio_b64=ref_b64, language="Auto",
+            )
+        else:
+            func = functools.partial(
+                self.engine.generate_custom_voice,
+                text=text, speaker=voice.name, instruct=instructions or "", language="Auto",
+            )
+
+        wav_data, sr = await loop.run_in_executor(None, func)
+        audio_bytes = wav_to_format(wav_data, sr, output_format)
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
         response_data = {
             "audio": audio_b64,
-            "format": result.format,
-            "sample_rate": result.sample_rate,
-            "duration_seconds": result.duration_seconds,
-            "voice_id": result.voice_id,
+            "format": output_format,
+            "sample_rate": sr,
+            "voice_id": voice_id,
         }
 
         return TunnelMessage(

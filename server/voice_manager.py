@@ -9,9 +9,21 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-from server.tts_engine import TTSEngine, VoiceProfile
+from dataclasses import dataclass
+
+from server.tts_engine import TTSEngine
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class VoiceProfile:
+    """A voice profile for TTS generation."""
+    voice_id: str
+    name: str
+    voice_type: str  # "cloned", "designed", "builtin"
+    reference_audio: Optional[str] = None
+    description: Optional[str] = None
 
 # Default audiobook voice cast
 DEFAULT_VOICE_CAST: dict[str, dict] = {

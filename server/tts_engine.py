@@ -90,7 +90,7 @@ class TTSEngine:
         wavs, sr = model.generate_voice_design(
             text=text,
             language=language,
-            instruct=description,
+            voice_description=description,
         )
         return wavs[0], sr
 
@@ -131,17 +131,11 @@ class TTSEngine:
             ref_path = f.name
 
         try:
-            kwargs = dict(
+            wavs, sr = model.generate_voice_clone(
                 text=text,
                 language=language,
-                ref_audio=ref_path,
+                reference_audio=ref_path,
             )
-            if ref_text:
-                kwargs["ref_text"] = ref_text
-            else:
-                kwargs["x_vector_only_mode"] = True
-
-            wavs, sr = model.generate_voice_clone(**kwargs)
             return wavs[0], sr
         finally:
             Path(ref_path).unlink(missing_ok=True)
@@ -168,7 +162,7 @@ class TTSEngine:
         wavs, sr = model.generate_voice_clone(
             text=text,
             language=language,
-            voice_clone_prompt=prompt,
+            reference_audio=str(self._voice_prompts[voice_name]),
         )
         return wavs[0], sr
 
@@ -179,61 +173,30 @@ class TTSEngine:
         ref_text: str = "",
         description: str = "",
     ) -> dict:
-        """Save a voice clone prompt for future reuse."""
-        model_key = "base" if "base" in self._models else "base_small"
-        model = self.get_model(model_key)
-
+        """Save a voice clone reference audio for future reuse."""
         audio_bytes = base64.b64decode(ref_audio_b64)
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
-            f.write(audio_bytes)
-            ref_path = f.name
 
-        try:
-            kwargs = dict(ref_audio=ref_path)
-            if ref_text:
-                kwargs["ref_text"] = ref_text
-                kwargs["x_vector_only_mode"] = False
-            else:
-                kwargs["x_vector_only_mode"] = True
+        # Save to disk
+        voice_dir = config.VOICES_DIR / name
+        voice_dir.mkdir(parents=True, exist_ok=True)
+        ref_wav = voice_dir / "ref.wav"
+        ref_wav.write_bytes(audio_bytes)
 
-            prompt = model.create_voice_clone_prompt(**kwargs)
-            self._voice_prompts[name] = prompt
+        # Save metadata
+        meta = {"name": name, "ref_text": ref_text, "description": description}
+        (voice_dir / "meta.json").write_text(json.dumps(meta))
 
-            # Save to disk
-            voice_dir = config.VOICES_DIR / name
-            voice_dir.mkdir(parents=True, exist_ok=True)
-            # Save reference audio
-            with open(voice_dir / "ref.wav", "wb") as vf:
-                vf.write(audio_bytes)
-            # Save metadata
-            meta = {"name": name, "ref_text": ref_text, "description": description}
-            (voice_dir / "meta.json").write_text(json.dumps(meta))
+        # Cache reference audio path
+        self._voice_prompts[name] = str(ref_wav)
 
-            return {"name": name, "status": "saved"}
-        finally:
-            Path(ref_path).unlink(missing_ok=True)
+        return {"name": name, "status": "saved"}
 
     def _load_voice_prompt(self, name: str, voice_dir: Path):
-        """Load a cached voice prompt from disk."""
-        model_key = "base" if "base" in self._models else "base_small"
-        model = self.get_model(model_key)
-
-        meta_path = voice_dir / "meta.json"
+        """Load a cached voice reference audio path from disk."""
         ref_path = voice_dir / "ref.wav"
         if not ref_path.exists():
             raise FileNotFoundError(f"No ref.wav for voice '{name}'")
-
-        meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
-        ref_text = meta.get("ref_text", "")
-
-        kwargs = dict(ref_audio=str(ref_path))
-        if ref_text:
-            kwargs["ref_text"] = ref_text
-            kwargs["x_vector_only_mode"] = False
-        else:
-            kwargs["x_vector_only_mode"] = True
-
-        self._voice_prompts[name] = model.create_voice_clone_prompt(**kwargs)
+        self._voice_prompts[name] = str(ref_path)
 
     def list_voices(self) -> list[dict]:
         """List all saved voices."""
