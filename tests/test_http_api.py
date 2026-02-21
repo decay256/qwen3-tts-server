@@ -2,6 +2,7 @@
 
 import json
 import pytest
+import pytest_asyncio
 from unittest.mock import AsyncMock, MagicMock
 
 from aiohttp.test_utils import TestClient, TestServer
@@ -22,7 +23,7 @@ def relay(relay_config):
     return RemoteRelay(relay_config)
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def client(relay):
     app = relay.create_app()
     async with TestClient(TestServer(app)) as c:
