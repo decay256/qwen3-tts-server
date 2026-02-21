@@ -90,7 +90,7 @@ class TTSEngine:
         wavs, sr = model.generate_voice_design(
             text=text,
             language=language,
-            voice_description=description,
+            instruct=description,
         )
         return wavs[0], sr
 
