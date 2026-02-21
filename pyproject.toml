@@ -33,6 +33,9 @@ qwen3-tts-local = "server.local_server:main"
 qwen3-tts-relay = "server.remote_relay:main"
 qwen3-tts-keygen = "scripts.generate_keys:main"
 
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+
 [tool.ruff]
 line-length = 100
 target-version = "py310"

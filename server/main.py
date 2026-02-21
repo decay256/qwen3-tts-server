@@ -1,41 +1,40 @@
 #!/usr/bin/env python3
 """Qwen3-TTS Server — entry point.
 
-Loads TTS models on GPU and connects to the OpenClaw bridge via WebSocket tunnel.
+Loads TTS models on GPU and connects to the remote relay via WebSocket tunnel.
+Can run in two modes:
+  - local: GPU server that connects to a remote relay via tunnel
+  - remote: Relay server that accepts tunnel connections and exposes REST API
 """
 
 import asyncio
 import logging
+import os
 import signal
 import sys
 
-from . import config
-from .tts_engine import TTSEngine
-from .tunnel import TunnelClient
-
 logging.basicConfig(
-    level=getattr(logging, config.LOG_LEVEL),
+    level=logging.INFO,
     format="%(asctime)s %(levelname)-8s [%(name)s] %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
 logger = logging.getLogger("qwen3-tts")
 
 
-async def main():
-    logger.info("=" * 60)
-    logger.info("Qwen3-TTS Server starting...")
-    logger.info("Enabled models: %s", config.ENABLED_MODELS)
-    logger.info("Bridge URL: %s", config.BRIDGE_URL)
-    logger.info("=" * 60)
+async def run_local():
+    """Run the local GPU server."""
+    from .local_server import LocalServer, load_config, setup_logging
 
-    # Load models
-    engine = TTSEngine()
-    logger.info("Loading TTS models (this may take a minute)...")
-    engine.load_models()
-    logger.info("Models ready! %s", engine.get_health())
+    config_path = os.environ.get("QWEN3_TTS_CONFIG", "config.yaml")
 
-    # Start tunnel
-    tunnel = TunnelClient(engine)
+    try:
+        config = load_config(config_path)
+    except (FileNotFoundError, ValueError) as e:
+        logger.error("Configuration error: %s", e)
+        sys.exit(1)
+
+    setup_logging(config)
+    server = LocalServer(config)
 
     # Graceful shutdown
     loop = asyncio.get_event_loop()
@@ -48,16 +47,15 @@ async def main():
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _shutdown, sig)
 
-    # Run tunnel with stop handling
-    tunnel_task = asyncio.create_task(tunnel.start())
+    server_task = asyncio.create_task(server.start())
     stop_task = asyncio.create_task(stop_event.wait())
 
     done, pending = await asyncio.wait(
-        [tunnel_task, stop_task],
+        [server_task, stop_task],
         return_when=asyncio.FIRST_COMPLETED,
     )
 
-    await tunnel.stop()
+    await server.stop()
     for t in pending:
         t.cancel()
 
@@ -66,7 +64,7 @@ async def main():
 
 def run():
     """CLI entry point."""
-    asyncio.run(main())
+    asyncio.run(run_local())
 
 
 if __name__ == "__main__":

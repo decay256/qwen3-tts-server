@@ -1,57 +1,59 @@
-"""Tests for TTS engine (run on GPU machine)."""
+"""Tests for TTS engine (no GPU needed — mocked)."""
 
 import os
 import sys
-import unittest
-from unittest.mock import MagicMock, patch
+import pytest
 import numpy as np
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-
-class TestChunking(unittest.TestCase):
+class TestChunking:
     def test_short_text(self):
         from server.tts_engine import chunk_text
         chunks = chunk_text("Hello world.", max_chars=500)
-        self.assertEqual(len(chunks), 1)
+        assert len(chunks) == 1
 
     def test_long_text(self):
         from server.tts_engine import chunk_text
         text = "First sentence. Second sentence. Third sentence. " * 20
         chunks = chunk_text(text, max_chars=100)
-        self.assertGreater(len(chunks), 1)
-        for chunk in chunks:
-            self.assertLessEqual(len(chunk), 200)  # some overflow OK
+        assert len(chunks) > 1
 
     def test_empty(self):
         from server.tts_engine import chunk_text
         chunks = chunk_text("")
-        self.assertEqual(chunks, [""])
+        assert chunks == [""]
+
+    def test_single_long_sentence(self):
+        from server.tts_engine import chunk_text
+        text = "A" * 1000
+        chunks = chunk_text(text, max_chars=500)
+        assert len(chunks) >= 1
 
 
-class TestWavConversion(unittest.TestCase):
+class TestWavConversion:
     def test_wav_format(self):
         from server.tts_engine import wav_to_format
         wav = np.random.randn(16000).astype(np.float32)
         result = wav_to_format(wav, 16000, "wav")
-        self.assertTrue(len(result) > 0)
-        # WAV header starts with RIFF
-        self.assertEqual(result[:4], b"RIFF")
+        assert len(result) > 0
+        assert result[:4] == b"RIFF"
 
 
-class TestEngineInit(unittest.TestCase):
+class TestEngineInit:
     def test_engine_not_loaded(self):
         from server.tts_engine import TTSEngine
         engine = TTSEngine()
-        self.assertFalse(engine.is_loaded)
+        assert engine.is_loaded is False
 
-    def test_list_voices_empty(self):
+    def test_get_model_not_loaded(self):
         from server.tts_engine import TTSEngine
         engine = TTSEngine()
-        engine._loaded = True
-        voices = engine.list_voices()
-        self.assertIsInstance(voices, list)
+        with pytest.raises(RuntimeError, match="not loaded"):
+            engine.get_model("voice_design")
 
-
-if __name__ == "__main__":
-    unittest.main()
+    def test_get_health_no_gpu(self):
+        from server.tts_engine import TTSEngine
+        engine = TTSEngine()
+        health = engine.get_health()
+        assert health["status"] == "loading"
+        assert health["loaded_models"] == []

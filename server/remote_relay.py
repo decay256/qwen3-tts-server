@@ -37,7 +37,7 @@ class RemoteRelay:
         self.config = config
         self.api_key = config["api_key"]
         self.auth_manager = AuthManager(self.api_key)
-        self.tunnel_server = TunnelServer(self.auth_manager)
+        self.tunnel_server = TunnelServer()
         self.start_time = time.time()
 
         remote = config.get("remote", {})
@@ -210,6 +210,15 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
 
+        # Allowed audio MIME types for clone uploads
+        ALLOWED_AUDIO_TYPES = {
+            "audio/wav", "audio/x-wav", "audio/wave",
+            "audio/mpeg", "audio/mp3",
+            "audio/ogg", "audio/flac",
+            "audio/webm", "audio/mp4",
+            "application/octet-stream",
+        }
+
         # Handle multipart upload
         if request.content_type == "multipart/form-data":
             reader = await request.multipart()
@@ -220,6 +229,12 @@ class RemoteRelay:
                 if part.name == "voice_name":
                     voice_name = (await part.read()).decode("utf-8")
                 elif part.name == "reference_audio":
+                    ct = part.headers.get("Content-Type", "application/octet-stream")
+                    if ct not in ALLOWED_AUDIO_TYPES:
+                        return web.json_response(
+                            {"error": f"Invalid audio type: {ct}. Allowed: wav, mp3, ogg, flac"},
+                            status=400,
+                        )
                     audio_data = await part.read()
                     audio_b64 = base64.b64encode(audio_data).decode("ascii")
 

@@ -47,7 +47,7 @@ class TTSClient:
     """Async client for the Qwen3-TTS remote relay API.
 
     Usage:
-        async with TTSClient("http://104.248.27.154:9800", "your-api-key") as client:
+        async with TTSClient("http://your-relay-host:9800", "your-api-key") as client:
             result = await client.synthesize("Hello world", voice_id="Narrator")
             result.save("output.mp3")
     """
@@ -56,7 +56,7 @@ class TTSClient:
         """Initialize the TTS client.
 
         Args:
-            base_url: Base URL of the remote relay (e.g. http://104.248.27.154:9800).
+            base_url: Base URL of the remote relay (e.g. http://your-relay-host:9800).
             api_key: API key for authentication.
             timeout: Request timeout in seconds.
         """

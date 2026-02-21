@@ -30,7 +30,7 @@ def _get_or_generate_token() -> str:
 AUTH_TOKEN: str = _get_or_generate_token()
 
 # Bridge
-BRIDGE_URL: str = os.getenv("BRIDGE_URL", "wss://104.248.27.154:8765")
+BRIDGE_URL: str = os.getenv("BRIDGE_URL", "")
 BRIDGE_HTTP_PORT: int = int(os.getenv("BRIDGE_HTTP_PORT", "8766"))
 BRIDGE_WS_PORT: int = int(os.getenv("BRIDGE_WS_PORT", "8765"))
 
