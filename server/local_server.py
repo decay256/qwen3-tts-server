@@ -253,9 +253,14 @@ class LocalServer:
         import functools
 
         if voice.voice_type == "designed":
+            # Use per-request instruct override if provided, otherwise voice description
+            description = voice.description or ""
+            if instructions:
+                # Combine: base voice character + per-request emotion/delivery
+                description = f"{description}. {instructions}" if description else instructions
             func = functools.partial(
                 self.engine.generate_voice_design,
-                text=text, description=voice.description or "", language="Auto",
+                text=text, description=description, language="Auto",
             )
         elif voice.voice_type == "cloned" and voice.reference_audio:
             with open(voice.reference_audio, "rb") as f:
