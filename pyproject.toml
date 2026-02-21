@@ -25,7 +25,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "black", "ruff", "mypy"]
+dev = ["pytest", "pytest-asyncio>=0.24.0", "black", "ruff", "mypy"]
 flash-attn = ["flash-attn>=2.5.0"]
 
 [project.scripts]

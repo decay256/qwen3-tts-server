@@ -52,8 +52,11 @@ class TestEngineInit:
             engine.get_model("voice_design")
 
     def test_get_health_no_gpu(self):
+        from unittest.mock import patch
         from server.tts_engine import TTSEngine
         engine = TTSEngine()
-        health = engine.get_health()
+        # Mock torch import to avoid access violation on Windows without proper CUDA
+        with patch.dict("sys.modules", {"torch": None}):
+            health = engine.get_health()
         assert health["status"] == "loading"
         assert health["loaded_models"] == []
