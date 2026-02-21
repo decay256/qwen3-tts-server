@@ -28,6 +28,7 @@ Run Qwen3-TTS on your GPU machine and expose it securely to a remote server — 
 
 ### 1. Setup (GPU machine)
 
+**Linux/macOS:**
 ```bash
 git clone https://github.com/YOUR_USER/qwen3-tts-server.git
 cd qwen3-tts-server
@@ -35,7 +36,20 @@ chmod +x scripts/setup.sh
 ./scripts/setup.sh
 ```
 
-This creates a venv, installs `qwen-tts` + PyTorch + flash-attn, generates an auth token, and creates `.env`.
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/YOUR_USER/qwen3-tts-server.git
+cd qwen3-tts-server
+python -m venv .venv
+.venv\Scripts\Activate.ps1
+pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu124
+pip install -r requirements.txt
+pip install flash-attn --no-build-isolation  # optional, may fail on Windows — that's fine
+cp .env.example .env
+# Edit .env — set AUTH_TOKEN to a random secret (e.g. python -c "import secrets; print(secrets.token_hex(32))")
+```
+
+Both paths create a venv, install `qwen-tts` + PyTorch + flash-attn, and set up `.env`.
 
 ### 2. Configure
 
