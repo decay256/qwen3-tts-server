@@ -44,8 +44,12 @@ async def run_local():
         logger.info("Received %s, shutting down...", sig.name)
         stop_event.set()
 
-    for sig in (signal.SIGINT, signal.SIGTERM):
-        loop.add_signal_handler(sig, _shutdown, sig)
+    if sys.platform != "win32":
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, _shutdown, sig)
+    else:
+        # Windows doesn't support loop.add_signal_handler; use Ctrl+C via KeyboardInterrupt
+        signal.signal(signal.SIGINT, lambda s, f: _shutdown(signal.Signals(s)))
 
     server_task = asyncio.create_task(server.start())
     stop_task = asyncio.create_task(stop_event.wait())
