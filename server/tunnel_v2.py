@@ -223,16 +223,11 @@ class EnhancedTunnelClient:
         self._state = ConnectionState.CONNECTING
         self._health.record_attempt()
         
-        # Configure connection parameters for stability
-        extra_headers = {}
-        if self.ca_cert:
-            extra_headers['ca-cert'] = self.ca_cert
-        
         try:
             # Create connection with optimized settings for fiber/LAN
+            # Note: ca_cert handling would be done via ssl_context if needed
             async with websockets.connect(
                 self.remote_url,
-                extra_headers=extra_headers,
                 ping_interval=HEARTBEAT_INTERVAL,
                 ping_timeout=HEARTBEAT_TIMEOUT,
                 close_timeout=10,
