@@ -144,8 +144,14 @@ class EnhancedTunnelClient:
             return
             
         self._running = True
-        self._main_task = asyncio.create_task(self._connection_loop())
-        logger.info("Enhanced tunnel client started")
+        logger.info("Creating connection loop task...")
+        try:
+            self._main_task = asyncio.create_task(self._connection_loop())
+            logger.info("Enhanced tunnel client started, task created: %s", self._main_task)
+        except Exception as e:
+            logger.error("Failed to create connection loop task: %s", e, exc_info=True)
+            self._running = False
+            raise
     
     async def stop(self) -> None:
         """Stop the tunnel client gracefully."""
@@ -191,6 +197,8 @@ class EnhancedTunnelClient:
         
         while self._running:
             try:
+                logger.debug("Connection loop iteration, running=%s, state=%s", self._running, self._state.value)
+                
                 # Check circuit breaker
                 if self._state == ConnectionState.CIRCUIT_BREAKER:
                     if time.time() < self._circuit_breaker_until:
@@ -204,12 +212,15 @@ class EnhancedTunnelClient:
                 await self._connect_and_run()
                 
             except asyncio.CancelledError:
+                logger.info("Connection loop cancelled")
                 break
             except Exception as e:
+                logger.error("Connection loop exception: %s", e, exc_info=True)
                 failure_type = self._classify_failure(e)
                 self._handle_connection_failure(failure_type, str(e))
                 
                 if not self._running:
+                    logger.info("Connection loop exiting (_running=False)")
                     break
                 
                 # Wait before reconnect with enhanced backoff
@@ -217,13 +228,17 @@ class EnhancedTunnelClient:
                 logger.info("Reconnecting in %.1fs... (attempt %d, failure: %s)", 
                            delay, self._health.total_attempts + 1, failure_type.value)
                 await asyncio.sleep(delay)
+        
+        logger.info("Connection loop finished, _running=%s", self._running)
     
     async def _connect_and_run(self) -> None:
         """Connect and run message loop with comprehensive error handling."""
+        logger.debug("_connect_and_run starting")
         self._state = ConnectionState.CONNECTING
         self._health.record_attempt()
         
         try:
+            logger.debug("Attempting WebSocket connection to %s", self.remote_url)
             # Create connection with optimized settings for fiber/LAN
             # Note: ca_cert handling would be done via ssl_context if needed
             async with websockets.connect(
@@ -235,6 +250,7 @@ class EnhancedTunnelClient:
                 compression=None,  # Disable compression for LAN performance
                 open_timeout=CONNECTION_TIMEOUT
             ) as ws:
+                logger.debug("WebSocket connection established")
                 self._ws = ws
                 self._state = ConnectionState.CONNECTED
                 self._connect_count += 1
