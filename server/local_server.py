@@ -204,7 +204,12 @@ class LocalServer:
         )
 
     async def _handle_synthesize(self, request: TunnelMessage) -> TunnelMessage:
-        """Handle POST /api/v1/tts/synthesize."""
+        """Handle POST /api/v1/tts/synthesize.
+
+        Supports two modes:
+        - voice_id: look up by ID or name, use design/clone/builtin as appropriate
+        - voice_name: shortcut for clone-mode — look up saved voice by name
+        """
         if not request.body:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
@@ -215,6 +220,7 @@ class LocalServer:
         data = json.loads(request.body)
         text = data.get("text")
         voice_id = data.get("voice_id")
+        voice_name = data.get("voice_name")
         instructions = data.get("instructions")
         output_format = data.get("format", "mp3")
 
@@ -224,19 +230,23 @@ class LocalServer:
                 status_code=400,
                 body=json.dumps({"error": "Missing 'text' field"}),
             )
-        if not voice_id:
+
+        # Resolve voice: voice_name takes precedence (clone mode)
+        voice = None
+        lookup_key = voice_name or voice_id
+        if not lookup_key:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 status_code=400,
-                body=json.dumps({"error": "Missing 'voice_id' field"}),
+                body=json.dumps({"error": "Missing 'voice_id' or 'voice_name' field"}),
             )
 
-        voice = self.voice_manager.get_voice(voice_id)
+        voice = self.voice_manager.get_voice(lookup_key)
         if not voice:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 status_code=404,
-                body=json.dumps({"error": f"Voice not found: {voice_id}"}),
+                body=json.dumps({"error": f"Voice not found: {lookup_key}"}),
             )
 
         if not self.engine.is_loaded:
@@ -252,24 +262,25 @@ class LocalServer:
         from .tts_engine import wav_to_format
         import functools
 
-        if voice.voice_type == "designed":
-            # Use per-request instruct override if provided, otherwise voice description
-            description = voice.description or ""
-            if instructions:
-                # Combine: base voice character + per-request emotion/delivery
-                description = f"{description}. {instructions}" if description else instructions
-            func = functools.partial(
-                self.engine.generate_voice_design,
-                text=text, description=description, language="Auto",
-            )
-        elif voice.voice_type == "cloned" and voice.reference_audio:
+        if voice.voice_type == "cloned" and voice.reference_audio:
+            # Clone mode — consistent voice from saved reference audio
             with open(voice.reference_audio, "rb") as f:
                 ref_b64 = base64.b64encode(f.read()).decode()
             func = functools.partial(
                 self.engine.generate_voice_clone,
                 text=text, ref_audio_b64=ref_b64, language="Auto",
             )
+        elif voice.voice_type == "designed":
+            # Design mode — stochastic, different each time
+            description = voice.description or ""
+            if instructions:
+                description = f"{description}. {instructions}" if description else instructions
+            func = functools.partial(
+                self.engine.generate_voice_design,
+                text=text, description=description, language="Auto",
+            )
         else:
+            # Builtin CustomVoice mode
             func = functools.partial(
                 self.engine.generate_custom_voice,
                 text=text, speaker=voice.name, instruct=instructions or "", language="Auto",
@@ -283,7 +294,7 @@ class LocalServer:
             "audio": audio_b64,
             "format": output_format,
             "sample_rate": sr,
-            "voice_id": voice_id,
+            "voice_id": voice.voice_id,
         }
 
         return TunnelMessage(
@@ -327,7 +338,15 @@ class LocalServer:
         )
 
     async def _handle_design(self, request: TunnelMessage) -> TunnelMessage:
-        """Handle POST /api/v1/tts/design."""
+        """Handle POST /api/v1/tts/design.
+
+        Generates speech with a designed voice from a text description.
+        Returns the audio so the caller can audition it and optionally
+        save it as a clone reference via /clone.
+
+        Required fields: text, description
+        Optional: language (default "English"), format (default "wav"), name
+        """
         if not request.body:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
@@ -336,9 +355,17 @@ class LocalServer:
             )
 
         data = json.loads(request.body)
+        text = data.get("text")
         description = data.get("description")
-        name = data.get("name")
+        language = data.get("language", "English")
+        output_format = data.get("format", "wav")
 
+        if not text:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                status_code=400,
+                body=json.dumps({"error": "Missing 'text' field"}),
+            )
         if not description:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
@@ -346,16 +373,34 @@ class LocalServer:
                 body=json.dumps({"error": "Missing 'description' field"}),
             )
 
-        profile = self.voice_manager.design_voice(description, name=name)
+        if not self.engine.is_loaded:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                status_code=503,
+                body=json.dumps({"error": "TTS models not loaded"}),
+            )
+
+        loop = asyncio.get_event_loop()
+        from .tts_engine import wav_to_format
+        import functools
+
+        func = functools.partial(
+            self.engine.generate_voice_design,
+            text=text, description=description, language=language,
+        )
+        wav_data, sr = await loop.run_in_executor(None, func)
+        audio_bytes = wav_to_format(wav_data, sr, output_format)
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
 
         return TunnelMessage(
             type=MessageType.RESPONSE,
             body=json.dumps({
-                "voice_id": profile.voice_id,
-                "name": profile.name,
-                "type": profile.voice_type,
-                "description": profile.description,
+                "audio": audio_b64,
+                "format": output_format,
+                "sample_rate": sr,
+                "description": description,
             }),
+            body_binary=True,
             headers={"Content-Type": "application/json"},
         )
 
