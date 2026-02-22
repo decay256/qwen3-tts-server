@@ -406,21 +406,22 @@ class EnhancedTunnelClient:
         """Calculate reconnect delay based on failure type and history."""
         # Auth failures: don't retry aggressively
         if failure_type == FailureType.AUTH_FAILURE:
-            return min(30, RECONNECT_MAX_DELAY)
+            return 30.0
         
-        # Network issues on fiber: start fast, backoff quickly
-        base_delay = self._reconnect_delay
-        
-        # Factor in consecutive failures
-        failure_multiplier = min(2 ** (self._health.consecutive_failures - 1), 8)
-        
-        # Calculate delay
-        delay = base_delay * failure_multiplier
-        
-        # Update for next time (exponential backoff)
-        self._reconnect_delay = min(self._reconnect_delay * 1.5, RECONNECT_MAX_DELAY)
-        
-        return min(delay, RECONNECT_MAX_DELAY)
+        # All other failures: flat 10 second reconnect (no exponential backoff)
+        return 10.0
+    
+    async def wait_for_connection(self, timeout: float = 60) -> bool:
+        """Wait for connection to be established within timeout."""
+        start_time = time.time()
+        while time.time() - start_time < timeout:
+            if self.is_connected:
+                return True
+            # Sleep for shorter intervals to respect timeout more precisely
+            sleep_time = min(0.1, timeout - (time.time() - start_time))
+            if sleep_time > 0:
+                await asyncio.sleep(sleep_time)
+        return False
     
     def get_status(self) -> Dict[str, Any]:
         """Get comprehensive connection status."""

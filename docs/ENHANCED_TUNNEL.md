@@ -7,9 +7,9 @@ The Enhanced Tunnel System provides robust, production-ready WebSocket connectiv
 ## Key Features
 
 ### 🔄 **Robust Reconnection Logic**
-- **Smart backoff**: Fast reconnection for fiber connections, exponential backoff for persistent issues
+- **Flat reconnection timing**: 10-second intervals for consistent, predictable reconnection
 - **Circuit breaker pattern**: Prevents resource waste during extended outages
-- **Differentiated retry logic**: Different strategies for auth failures vs network issues
+- **Differentiated retry logic**: Different strategies for auth failures (30s) vs network issues (10s)
 
 ### 📊 **Connection Health Monitoring**
 - **Real-time metrics**: Success rates, failure types, connection stability
@@ -179,12 +179,12 @@ if cb['active']:
 
 | Type | Description | Retry Strategy |
 |------|-------------|----------------|
-| `AUTH_FAILURE` | Invalid API key | Long delay (30s+) |
-| `CONNECTION_REFUSED` | Network unreachable | Progressive backoff |
-| `NETWORK_ERROR` | Connection dropped | Fast retry, then backoff |
-| `TIMEOUT` | Connection/auth timeout | Medium delay |
-| `PROTOCOL_ERROR` | Message format issues | Medium delay |
-| `UNKNOWN` | Other errors | Progressive backoff |
+| `AUTH_FAILURE` | Invalid API key | Fixed 30s delay |
+| `CONNECTION_REFUSED` | Network unreachable | Fixed 10s delay |
+| `NETWORK_ERROR` | Connection dropped | Fixed 10s delay |
+| `TIMEOUT` | Connection/auth timeout | Fixed 10s delay |
+| `PROTOCOL_ERROR` | Message format issues | Fixed 10s delay |
+| `UNKNOWN` | Other errors | Fixed 10s delay |
 
 ## Troubleshooting
 
