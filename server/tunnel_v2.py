@@ -119,7 +119,6 @@ class EnhancedTunnelClient:
         self._circuit_breaker_until: float = 0
         
         # Tasks
-        self._main_task: Optional[asyncio.Task] = None
         self._heartbeat_task: Optional[asyncio.Task] = None
     
     @property
@@ -138,26 +137,30 @@ class EnhancedTunnelClient:
         return self._health
     
     async def start(self) -> None:
-        """Start the enhanced tunnel client."""
+        """Start the enhanced tunnel client with blocking connection loop (compatible with original)."""
         if self._running:
             logger.warning("Tunnel client already running")
             return
             
         self._running = True
-        logger.info("Creating connection loop task...")
+        logger.info("Starting enhanced tunnel client (blocking mode)")
+        
+        # Run connection loop directly (blocking, like original tunnel client)
+        # This maintains compatibility with LocalServer that expects start() to block
         try:
-            self._main_task = asyncio.create_task(self._connection_loop())
-            logger.info("Enhanced tunnel client started, task created: %s", self._main_task)
+            await self._connection_loop()
         except Exception as e:
-            logger.error("Failed to create connection loop task: %s", e, exc_info=True)
-            self._running = False
+            logger.error("Connection loop failed: %s", e, exc_info=True)
             raise
+        finally:
+            self._running = False
     
     async def stop(self) -> None:
         """Stop the tunnel client gracefully."""
+        logger.info("Stopping enhanced tunnel client...")
         self._running = False
         
-        # Cancel tasks
+        # Cancel heartbeat task
         if self._heartbeat_task:
             self._heartbeat_task.cancel()
             try:
@@ -165,14 +168,7 @@ class EnhancedTunnelClient:
             except asyncio.CancelledError:
                 pass
         
-        if self._main_task:
-            self._main_task.cancel()
-            try:
-                await self._main_task
-            except asyncio.CancelledError:
-                pass
-        
-        # Close connection
+        # Close connection (this will cause connection loop to exit)
         if self._ws:
             await self._ws.close()
             self._ws = None
