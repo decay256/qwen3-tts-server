@@ -269,11 +269,20 @@ def wav_to_format(wav: np.ndarray, sr: int, fmt: str = "mp3") -> bytes:
 
     out_path = wav_path.replace(".wav", f".{fmt}")
     try:
+        # Try libmp3lame first, fallback to built-in mp3 encoder
         codec = {"mp3": "libmp3lame", "ogg": "libvorbis"}.get(fmt, fmt)
-        subprocess.run(
-            ["ffmpeg", "-y", "-i", wav_path, "-c:a", codec, "-q:a", "2", out_path],
-            capture_output=True, check=True, timeout=30,
-        )
+        cmd = ["ffmpeg", "-y", "-i", wav_path, "-c:a", codec, "-q:a", "2", out_path]
+        
+        try:
+            subprocess.run(cmd, capture_output=True, check=True, timeout=30)
+        except subprocess.CalledProcessError as e:
+            if fmt == "mp3":
+                # Fallback: try built-in Windows MP3 encoder
+                codec = "mp3"
+                cmd = ["ffmpeg", "-y", "-i", wav_path, "-c:a", codec, "-q:a", "2", out_path]
+                subprocess.run(cmd, capture_output=True, check=True, timeout=30)
+            else:
+                raise e
         return Path(out_path).read_bytes()
     finally:
         Path(wav_path).unlink(missing_ok=True)
