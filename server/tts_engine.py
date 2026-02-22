@@ -135,6 +135,7 @@ class TTSEngine:
                 text=text,
                 language=language,
                 ref_audio=ref_path,
+                ref_text=ref_text,
             )
             return wavs[0], sr
         finally:
