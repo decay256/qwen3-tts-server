@@ -139,15 +139,22 @@ class LocalServer:
         Args:
             message: Incoming message from tunnel.
         """
+        logger.debug("Received tunnel message: type=%s, path=%s, method=%s", 
+                    message.type, message.path, message.method)
+        
         try:
             if message.type == MessageType.REQUEST:
+                logger.debug("Processing request: %s %s", message.method, message.path)
                 # Process request and send response
                 response = await self._handle_request(message)
+                logger.debug("Sending response: status=%s, body_size=%s", 
+                           response.status_code, len(response.body or ""))
                 await self.tunnel.send_message(response)
+                logger.debug("Response sent successfully")
             # Other message types (heartbeat, etc.) are handled automatically by enhanced client
             
         except Exception as e:
-            logger.error("Error handling tunnel message: %s", e)
+            logger.error("Error handling tunnel message: %s", e, exc_info=True)
             # Send error response if this was a request
             if message.type == MessageType.REQUEST:
                 error_response = TunnelMessage(
@@ -158,6 +165,7 @@ class LocalServer:
                 )
                 try:
                     await self.tunnel.send_message(error_response)
+                    logger.debug("Error response sent")
                 except Exception as send_error:
                     logger.error("Failed to send error response: %s", send_error)
 
@@ -278,7 +286,9 @@ class LocalServer:
         - voice_id: look up by ID or name, use design/clone/builtin as appropriate
         - voice_name: shortcut for clone-mode — look up saved voice by name
         """
+        logger.debug("=== SYNTHESIZE START ===")
         if not request.body:
+            logger.debug("Missing request body")
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 status_code=400,
@@ -286,6 +296,8 @@ class LocalServer:
             )
 
         data = json.loads(request.body)
+        logger.debug("Request data: %s", {k: v for k, v in data.items() if k != 'text'})
+        logger.debug("Text length: %d characters", len(data.get('text', '')))
         text = data.get("text")
         voice_id = data.get("voice_id")
         voice_name = data.get("voice_name")
@@ -358,9 +370,17 @@ class LocalServer:
                 text=text, speaker=voice.name, instruct=instructions or "", language="Auto",
             )
 
+        logger.debug("Starting voice generation...")
         wav_data, sr = await loop.run_in_executor(None, func)
+        logger.debug("Voice generation complete! wav shape: %s, sr: %d", wav_data.shape, sr)
+        
+        logger.debug("Converting to format: %s", output_format)
         audio_bytes = wav_to_format(wav_data, sr, output_format)
+        logger.debug("Format conversion complete! Size: %d bytes", len(audio_bytes))
+        
+        logger.debug("Encoding to base64...")
         audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+        logger.debug("Encoding complete! Base64 size: %d", len(audio_b64))
 
         response_data = {
             "audio": audio_b64,
@@ -369,6 +389,7 @@ class LocalServer:
             "voice_id": voice.voice_id,
         }
 
+        logger.debug("=== SYNTHESIZE COMPLETE ===")
         return TunnelMessage(
             type=MessageType.RESPONSE,
             body=json.dumps(response_data),
