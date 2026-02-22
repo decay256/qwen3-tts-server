@@ -158,6 +158,8 @@ class LocalServer:
                 return await self._handle_clone(request)
             elif path == "/api/v1/tts/design" and method == "POST":
                 return await self._handle_design(request)
+            elif path.startswith("/api/v1/tts/voices/") and method == "DELETE":
+                return await self._handle_delete_voice(request)
             else:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
@@ -202,6 +204,34 @@ class LocalServer:
             body=json.dumps({"voices": voices}),
             headers={"Content-Type": "application/json"},
         )
+
+    async def _handle_delete_voice(self, request: TunnelMessage) -> TunnelMessage:
+        """Handle DELETE /api/v1/tts/voices/{voice_id}."""
+        path = request.path or ""
+        voice_id = path.rsplit("/", 1)[-1]
+
+        if not voice_id:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                status_code=400,
+                body=json.dumps({"error": "voice_id required"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+        deleted = self.voice_manager.delete_voice(voice_id)
+        if deleted:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                body=json.dumps({"deleted": voice_id}),
+                headers={"Content-Type": "application/json"},
+            )
+        else:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                status_code=404,
+                body=json.dumps({"error": f"Voice not found: {voice_id}"}),
+                headers={"Content-Type": "application/json"},
+            )
 
     async def _handle_synthesize(self, request: TunnelMessage) -> TunnelMessage:
         """Handle POST /api/v1/tts/synthesize.

@@ -244,6 +244,18 @@ class RemoteRelay:
 
         return await self._forward_to_local("POST", "/api/v1/tts/clone", body=body)
 
+    async def handle_delete_voice(self, request: web.Request) -> web.Response:
+        """DELETE /api/v1/tts/voices/{voice_id}."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+
+        voice_id = request.match_info["voice_id"]
+        return await self._forward_to_local("DELETE", f"/api/v1/tts/voices/{voice_id}")
+
     async def handle_design(self, request: web.Request) -> web.Response:
         """POST /api/v1/tts/design."""
         auth_error = await self._require_auth(request)
@@ -283,6 +295,7 @@ class RemoteRelay:
         app.router.add_post("/api/v1/tts/synthesize", self.handle_synthesize)
         app.router.add_post("/api/v1/tts/clone", self.handle_clone)
         app.router.add_post("/api/v1/tts/design", self.handle_design)
+        app.router.add_delete("/api/v1/tts/voices/{voice_id}", self.handle_delete_voice)
 
         # WebSocket tunnel endpoint
         app.router.add_get("/ws/tunnel", self.handle_websocket_tunnel)

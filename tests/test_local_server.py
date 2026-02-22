@@ -233,3 +233,24 @@ async def test_handle_synthesize_engine_not_loaded(server):
     })
     resp = await server._handle_request(req)
     assert resp.status_code == 503
+
+
+@pytest.mark.asyncio
+async def test_handle_delete_voice(server):
+    # First create a voice to delete
+    voices = server.voice_manager.list_voices()
+    assert len(voices) > 0
+    voice_id = voices[0]["voice_id"]
+
+    req = make_request(f"/api/v1/tts/voices/{voice_id}", method="DELETE")
+    resp = await server._handle_request(req)
+    assert resp.status_code == 200 or resp.status_code is None  # None means 200 default
+    body = json.loads(resp.body)
+    assert body["deleted"] == voice_id
+
+
+@pytest.mark.asyncio
+async def test_handle_delete_voice_not_found(server):
+    req = make_request("/api/v1/tts/voices/nonexistent-id", method="DELETE")
+    resp = await server._handle_request(req)
+    assert resp.status_code == 404
