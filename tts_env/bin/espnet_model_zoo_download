@@ -1,0 +1,8 @@
+#!/home/openclaw/.openclaw/workspace/projects/qwen3-tts-server/tts_env/bin/python3
+# -*- coding: utf-8 -*-
+import re
+import sys
+from espnet_model_zoo.downloader import cmd_download
+if __name__ == '__main__':
+    sys.argv[0] = re.sub(r'(-script\.pyw|\.exe)?$', '', sys.argv[0])
+    sys.exit(cmd_download())
