@@ -134,7 +134,7 @@ class TTSEngine:
             wavs, sr = model.generate_voice_clone(
                 text=text,
                 language=language,
-                reference_audio=ref_path,
+                ref_audio=ref_path,
             )
             return wavs[0], sr
         finally:
