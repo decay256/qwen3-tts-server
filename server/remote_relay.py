@@ -342,6 +342,8 @@ class AioHTTPWebSocketAdapter:
         """Receive a message."""
         if self._receive_task is None:
             self._receive_task = asyncio.create_task(self._start_receiving())
+            # Give the receiving task a moment to start
+            await asyncio.sleep(0.001)
 
         if self._closed and self._queue.empty():
             raise ConnectionError("WebSocket closed")
@@ -350,7 +352,13 @@ class AioHTTPWebSocketAdapter:
 
     async def send(self, data: str) -> None:
         """Send a message."""
-        await self._ws.send_str(data)
+        if self._closed or self._ws.closed:
+            raise ConnectionError("WebSocket closed")
+        try:
+            await self._ws.send_str(data)
+        except Exception as e:
+            self._closed = True
+            raise ConnectionError(f"Failed to send: {e}")
 
     async def close(self, code: int = 1000, reason: str = "") -> None:
         """Close the connection."""

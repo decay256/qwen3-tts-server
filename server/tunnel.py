@@ -321,8 +321,12 @@ class TunnelServer:
                         await websocket.send(ack.to_json())
                     elif msg.type in (MessageType.RESPONSE, MessageType.ERROR):
                         # Route response to waiting future
+                        logger.debug(f"Received response: request_id={msg.request_id}, type={msg.type}")
                         if msg.request_id and msg.request_id in self._pending_requests:
+                            logger.debug(f"Setting future result for request {msg.request_id}")
                             self._pending_requests[msg.request_id].set_result(msg)
+                        else:
+                            logger.error(f"No pending request for {msg.request_id}, pending: {list(self._pending_requests.keys())}")
                     else:
                         logger.debug("Ignoring message type %s from client", msg.type)
                 except json.JSONDecodeError:
@@ -389,10 +393,22 @@ class TunnelServer:
         self._pending_requests[request_id] = future
 
         try:
+            logger.debug(f"Sending request {request_id}: {method} {path}")
             await ws.send(request.to_json())
+            logger.debug(f"Waiting for response to request {request_id}")
             response = await asyncio.wait_for(future, timeout=timeout)
+            logger.debug(f"Received response for request {request_id}")
             return response
         except asyncio.TimeoutError:
             raise TimeoutError(f"Request {request_id} timed out after {timeout}s")
+        except ConnectionError as e:
+            # WebSocket connection failed - remove the client
+            if client_id in self._clients:
+                del self._clients[client_id]
+                logger.warning(f"Removed failed tunnel client: {client_id}")
+            raise ConnectionError(f"Tunnel connection failed: {e}")
+        except Exception as e:
+            logger.error(f"Unexpected error sending request: {e}")
+            raise ConnectionError(f"Request failed: {e}")
         finally:
             self._pending_requests.pop(request_id, None)
