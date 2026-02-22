@@ -19,7 +19,8 @@ from typing import Optional
 import yaml
 
 from server.tts_engine import TTSEngine
-from server.tunnel import MessageType, TunnelClient, TunnelMessage
+from server.tunnel import MessageType, TunnelMessage
+from server.tunnel_v2 import EnhancedTunnelClient
 from server.voice_manager import VoiceManager, VoiceProfile
 
 logger = logging.getLogger(__name__)
@@ -94,13 +95,12 @@ class LocalServer:
         port = remote.get("port", 9800)
         self.tunnel_url = f"{scheme}://{host}:{port}/ws/tunnel"
 
-        # Tunnel client
-        self.tunnel = TunnelClient(
+        # Enhanced tunnel client with robust connection management
+        self.tunnel = EnhancedTunnelClient(
             remote_url=self.tunnel_url,
             api_key=config["api_key"],
-            request_handler=self._handle_request,
-            tls=remote.get("tls", False),
-            ca_cert=remote.get("ca_cert"),
+            on_message=self._handle_tunnel_message,
+            ca_cert=remote.get("ca_cert") if remote.get("tls", False) else None,
         )
 
     async def start(self) -> None:
@@ -132,6 +132,34 @@ class LocalServer:
         await self.tunnel.stop()
         # Models are freed when process exits
         logger.info("Server stopped")
+
+    async def _handle_tunnel_message(self, message: TunnelMessage) -> None:
+        """Handle incoming tunnel messages (callback-based).
+        
+        Args:
+            message: Incoming message from tunnel.
+        """
+        try:
+            if message.type == MessageType.REQUEST:
+                # Process request and send response
+                response = await self._handle_request(message)
+                await self.tunnel.send_message(response)
+            # Other message types (heartbeat, etc.) are handled automatically by enhanced client
+            
+        except Exception as e:
+            logger.error("Error handling tunnel message: %s", e)
+            # Send error response if this was a request
+            if message.type == MessageType.REQUEST:
+                error_response = TunnelMessage(
+                    type=MessageType.RESPONSE,
+                    message_id=message.message_id,
+                    status_code=500,
+                    body=json.dumps({"error": f"Internal server error: {str(e)}"})
+                )
+                try:
+                    await self.tunnel.send_message(error_response)
+                except Exception as send_error:
+                    logger.error("Failed to send error response: %s", send_error)
 
     async def _handle_request(self, request: TunnelMessage) -> TunnelMessage:
         """Route incoming tunnel requests to the appropriate handler.
@@ -175,9 +203,10 @@ class LocalServer:
             )
 
     async def _handle_status(self, request: TunnelMessage) -> TunnelMessage:
-        """Handle GET /api/v1/status."""
+        """Handle GET /api/v1/status - includes enhanced tunnel health."""
         gpu_info = self.engine.get_health()
         uptime = time.time() - self.start_time
+        tunnel_status = self.tunnel.get_status()
 
         status = {
             "status": "ok",
@@ -188,6 +217,15 @@ class LocalServer:
             "voices_count": len(self.voice_manager.list_voices()),
             "uptime_seconds": round(uptime, 1),
             "engine_ready": self.engine.is_loaded,
+            # Enhanced tunnel health information
+            "tunnel": {
+                "connected": tunnel_status["connected"],
+                "state": tunnel_status["state"],
+                "connection_count": tunnel_status["connection_count"],
+                "success_rate": round(tunnel_status["health"]["success_rate"], 3),
+                "consecutive_failures": tunnel_status["health"]["consecutive_failures"],
+                "circuit_breaker_active": tunnel_status["circuit_breaker"]["active"]
+            }
         }
 
         return TunnelMessage(
