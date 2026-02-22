@@ -262,6 +262,12 @@ def wav_to_format(wav: np.ndarray, sr: int, fmt: str = "mp3") -> bytes:
         sf.write(buf, wav, sr, format="WAV")
         return buf.getvalue()
 
+    # TEMPORARY FIX: Return WAV for all formats due to Windows ffmpeg DLL issues
+    logger.warning("Returning WAV instead of %s due to ffmpeg issues", fmt)
+    buf = io.BytesIO()
+    sf.write(buf, wav, sr, format="WAV")
+    return buf.getvalue()
+
     # For mp3/ogg, write wav then convert with ffmpeg
     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as wf:
         sf.write(wf.name, wav, sr)
