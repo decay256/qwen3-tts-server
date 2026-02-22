@@ -141,12 +141,16 @@ class VoiceManager:
         if voice_id in self._voices:
             return self._voices[voice_id]
 
-        # Name lookup
+        # Name lookup — prefer cloned voices over designed (clones are curated picks)
+        match_designed = None
         for v in self._voices.values():
             if v.name.lower() == voice_id.lower():
-                return v
+                if v.voice_type == "cloned":
+                    return v  # Clone found — return immediately
+                if match_designed is None:
+                    match_designed = v  # Remember first designed match as fallback
 
-        return None
+        return match_designed
 
     def clone_voice(self, reference_audio_path: str, name: str) -> VoiceProfile:
         """Clone a voice from reference audio.
