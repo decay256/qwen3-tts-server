@@ -77,7 +77,7 @@ class BridgeServer:
         path: str,
         body: str | None = None,
         headers: dict[str, str] | None = None,
-        timeout: float = 120,
+        timeout: float = 600,
     ) -> web.Response:
         """Forward a request through the tunnel."""
         if not self.is_connected:
