@@ -139,16 +139,16 @@ class LocalServer:
         Args:
             message: Incoming message from tunnel.
         """
-        logger.debug("Received tunnel message: type=%s, path=%s, method=%s", 
-                    message.type, message.path, message.method)
+        logger.debug("Received tunnel message: type=%s, path=%s, method=%s, request_id=%s", 
+                    message.type, message.path, message.method, message.request_id)
         
         try:
             if message.type == MessageType.REQUEST:
                 logger.debug("Processing request: %s %s", message.method, message.path)
                 # Process request and send response
                 response = await self._handle_request(message)
-                logger.debug("Sending response: status=%s, body_size=%s", 
-                           response.status_code, len(response.body or ""))
+                logger.debug("Sending response: status=%s, body_size=%s, request_id=%s", 
+                           response.status_code, len(response.body or ""), response.request_id)
                 await self.tunnel.send_message(response)
                 logger.debug("Response sent successfully")
             # Other message types (heartbeat, etc.) are handled automatically by enhanced client
@@ -200,7 +200,6 @@ class LocalServer:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                     status_code=404,
                     body=json.dumps({"error": f"Not found: {method} {path}"}),
                 )
@@ -208,7 +207,6 @@ class LocalServer:
             logger.exception("Error handling request %s %s", method, path)
             return TunnelMessage(
                 type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
                 status_code=500,
                 body=json.dumps({"error": str(e)}),
@@ -242,8 +240,6 @@ class LocalServer:
 
         return TunnelMessage(
             type=MessageType.RESPONSE,
-                request_id=request.request_id,
-                request_id=request.request_id,
             request_id=request.request_id,
             body=json.dumps(status),
             headers={"Content-Type": "application/json"},
@@ -255,8 +251,6 @@ class LocalServer:
         return TunnelMessage(
             type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
-            request_id=request.request_id,
             body=json.dumps({"voices": voices}),
             headers={"Content-Type": "application/json"},
         )
@@ -270,7 +264,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "voice_id required"}),
                 headers={"Content-Type": "application/json"},
@@ -281,14 +274,12 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 body=json.dumps({"deleted": voice_id}),
                 headers={"Content-Type": "application/json"},
             )
         else:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
                 status_code=404,
                 body=json.dumps({"error": f"Voice not found: {voice_id}"}),
@@ -308,7 +299,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing request body"}),
             )
@@ -326,7 +316,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing 'text' field"}),
             )
@@ -338,7 +327,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing 'voice_id' or 'voice_name' field"}),
             )
@@ -348,7 +336,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=404,
                 body=json.dumps({"error": f"Voice not found: {lookup_key}"}),
             )
@@ -356,7 +343,6 @@ class LocalServer:
         if not self.engine.is_loaded:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
                 status_code=503,
                 body=json.dumps({"error": "TTS models not loaded"}),
@@ -430,7 +416,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing request body"}),
             )
@@ -443,7 +428,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing 'voice_name' or 'reference_audio'"}),
             )
@@ -453,7 +437,6 @@ class LocalServer:
 
         return TunnelMessage(
             type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
             body=json.dumps({
                 "voice_id": profile.voice_id,
@@ -477,7 +460,6 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing request body"}),
             )
@@ -492,14 +474,12 @@ class LocalServer:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
                 request_id=request.request_id,
-                request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing 'text' field"}),
             )
         if not description:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
                 status_code=400,
                 body=json.dumps({"error": "Missing 'description' field"}),
@@ -508,7 +488,6 @@ class LocalServer:
         if not self.engine.is_loaded:
             return TunnelMessage(
                 type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
                 status_code=503,
                 body=json.dumps({"error": "TTS models not loaded"}),
@@ -528,7 +507,6 @@ class LocalServer:
 
         return TunnelMessage(
             type=MessageType.RESPONSE,
-                request_id=request.request_id,
                 request_id=request.request_id,
             body=json.dumps({
                 "audio": audio_b64,
