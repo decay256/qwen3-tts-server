@@ -296,8 +296,10 @@ class LocalServer:
             # Clone mode — consistent voice from saved reference audio
             with open(voice.reference_audio, "rb") as f:
                 ref_b64 = base64.b64encode(f.read()).decode()
-            # Use first few words of text as ref_text fallback
-            ref_text = " ".join(text.split()[:8])
+            # Provide meaningful ref_text - use full text or a good default
+            ref_text = text.strip()
+            if len(ref_text.split()) < 3:  # Too short, use a generic reference
+                ref_text = "Hello, this is a voice clone reference sample for speech synthesis."
             func = functools.partial(
                 self.engine.generate_voice_clone,
                 text=text, ref_audio_b64=ref_b64, ref_text=ref_text, language="Auto",
