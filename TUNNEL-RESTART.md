@@ -23,7 +23,7 @@ nohup python3 -m server.remote_relay > /tmp/relay.log 2>&1 &
 ```bash
 # Start local server
 cd qwen3-tts-server  
-python3 -m server.local_server
+python -m server.main
 ```
 
 ### Check Connection:
