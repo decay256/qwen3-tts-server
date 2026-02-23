@@ -22,7 +22,9 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL = 30  # seconds
 RECONNECT_BASE_DELAY = 1  # seconds
 RECONNECT_MAX_DELAY = 60  # seconds
-MESSAGE_TIMEOUT = 300  # 5 minutes max for TTS processing
+MESSAGE_TIMEOUT = 120  # 2 minutes max for TTS processing
+HEALTH_PING_INTERVAL = 15  # seconds — relay pings client
+HEALTH_PING_TIMEOUT = 10  # seconds — kill connection if no pong
 
 
 class MessageType(str, Enum):
@@ -269,6 +271,8 @@ class TunnelServer:
         self._clients: dict[str, WebSocketServerProtocol] = {}
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._client_counter = 0
+        self._last_pong: dict[str, float] = {}  # client_id → last pong time
+        self._health_tasks: dict[str, asyncio.Task] = {}
 
     @property
     def connected_clients(self) -> int:
@@ -326,15 +330,28 @@ class TunnelServer:
             await websocket.send(ok.to_json())
             logger.info("Tunnel client connected: %s from %s", client_id, websocket.remote_address)
 
+            # Start server-side health ping
+            self._last_pong[client_id] = time.time()
+            health_task = asyncio.create_task(
+                self._health_ping_loop(client_id, websocket)
+            )
+            self._health_tasks[client_id] = health_task
+
             # Process messages from client (responses to our requests)
             async for raw_message in websocket:
                 try:
                     msg = TunnelMessage.from_json(raw_message)
                     if msg.type == MessageType.HEARTBEAT:
+                        # Client heartbeat — update pong time and ack
+                        self._last_pong[client_id] = time.time()
                         ack = TunnelMessage(type=MessageType.HEARTBEAT_ACK)
                         await websocket.send(ack.to_json())
+                    elif msg.type == MessageType.HEARTBEAT_ACK:
+                        # Response to our server-side ping
+                        self._last_pong[client_id] = time.time()
                     elif msg.type in (MessageType.RESPONSE, MessageType.ERROR):
                         # Route response to waiting future
+                        self._last_pong[client_id] = time.time()  # any message = alive
                         logger.debug(f"Received response: request_id={msg.request_id}, type={msg.type}")
                         if msg.request_id and msg.request_id in self._pending_requests:
                             logger.debug(f"Setting future result for request {msg.request_id}")
@@ -353,9 +370,50 @@ class TunnelServer:
         except Exception:
             logger.exception("Error in tunnel connection handler")
         finally:
-            if client_id and client_id in self._clients:
-                del self._clients[client_id]
+            if client_id:
+                # Clean up health task
+                if client_id in self._health_tasks:
+                    self._health_tasks[client_id].cancel()
+                    del self._health_tasks[client_id]
+                self._last_pong.pop(client_id, None)
+                # Clean up client
+                if client_id in self._clients:
+                    del self._clients[client_id]
+                # Fail all pending requests
+                for req_id, future in list(self._pending_requests.items()):
+                    if not future.done():
+                        future.set_exception(ConnectionError("Tunnel client disconnected"))
+                self._pending_requests.clear()
                 logger.info("Removed tunnel client: %s (%d remaining)", client_id, len(self._clients))
+
+    async def _health_ping_loop(self, client_id: str, websocket) -> None:
+        """Periodically ping the tunnel client and kill stale connections."""
+        try:
+            while True:
+                await asyncio.sleep(HEALTH_PING_INTERVAL)
+
+                # Check if last pong is too old
+                last = self._last_pong.get(client_id, 0)
+                if time.time() - last > HEALTH_PING_INTERVAL + HEALTH_PING_TIMEOUT:
+                    logger.error(
+                        "Health check failed for %s: no response in %ds, killing connection",
+                        client_id, int(time.time() - last),
+                    )
+                    try:
+                        await websocket.close(4002, "Health check failed")
+                    except Exception:
+                        pass
+                    return
+
+                # Send ping
+                try:
+                    ping = TunnelMessage(type=MessageType.HEARTBEAT)
+                    await websocket.send(ping.to_json())
+                except Exception:
+                    logger.error("Failed to send health ping to %s", client_id)
+                    return
+        except asyncio.CancelledError:
+            pass
 
     async def send_request(
         self,
@@ -407,6 +465,11 @@ class TunnelServer:
         self._pending_requests[request_id] = future
 
         try:
+            # Check if connection is actually alive before sending
+            if hasattr(ws, 'closed') and ws.closed:
+                del self._clients[client_id]
+                raise ConnectionError("Tunnel connection is closed")
+
             logger.debug(f"Sending request {request_id}: {method} {path}")
             await ws.send(request.to_json())
             logger.debug(f"Waiting for response to request {request_id}")
@@ -414,9 +477,16 @@ class TunnelServer:
             logger.debug(f"Received response for request {request_id}")
             return response
         except asyncio.TimeoutError:
+            # Timeout likely means stale connection — remove client
+            logger.error(f"Request {request_id} timed out after {timeout}s — removing client")
+            if client_id in self._clients:
+                try:
+                    await ws.close(4002, "Request timeout")
+                except Exception:
+                    pass
+                del self._clients[client_id]
             raise TimeoutError(f"Request {request_id} timed out after {timeout}s")
         except ConnectionError as e:
-            # WebSocket connection failed - remove the client
             if client_id in self._clients:
                 del self._clients[client_id]
                 logger.warning(f"Removed failed tunnel client: {client_id}")

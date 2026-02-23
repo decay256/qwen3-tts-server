@@ -8,11 +8,13 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import gc
 import json
 import logging
 import os
 import sys
 import time
+from collections import deque
 from pathlib import Path
 from typing import Optional
 
@@ -23,6 +25,28 @@ from server.auth import AuthManager, extract_api_key
 from server.tunnel import TunnelServer
 
 logger = logging.getLogger(__name__)
+
+# Debug log ring buffer
+_debug_log: deque[dict] = deque(maxlen=500)
+_debug_subscribers: set[web.WebSocketResponse] = set()
+
+
+def debug_event(event_type: str, **kwargs) -> None:
+    """Record a debug event and broadcast to subscribers."""
+    entry = {"t": time.time(), "type": event_type, **kwargs}
+    _debug_log.append(entry)
+    # Fire-and-forget broadcast to debug subscribers
+    dead = []
+    for ws in _debug_subscribers:
+        if ws.closed:
+            dead.append(ws)
+            continue
+        try:
+            asyncio.ensure_future(ws.send_json(entry))
+        except Exception:
+            dead.append(ws)
+    for ws in dead:
+        _debug_subscribers.discard(ws)
 
 
 class RemoteRelay:
@@ -106,6 +130,7 @@ class RemoteRelay:
             aiohttp Response.
         """
         try:
+            debug_event("forward_start", method=method, path=path)
             response = await self.tunnel_server.send_request(
                 method=method,
                 path=path,
@@ -113,6 +138,7 @@ class RemoteRelay:
                 headers=headers,
                 timeout=timeout,
             )
+            debug_event("forward_done", method=method, path=path, status=response.status_code)
 
             status = response.status_code
             resp_body = response.body or "{}"
@@ -199,7 +225,14 @@ class RemoteRelay:
             return tunnel_error
 
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/tts/synthesize", body=body)
+        debug_event("synth_start", body_len=len(body))
+        try:
+            resp = await self._forward_to_local("POST", "/api/v1/tts/synthesize", body=body)
+            debug_event("synth_done", status=resp.status, body_len=resp.body_length if hasattr(resp, 'body_length') else 0)
+            return resp
+        finally:
+            # Force GC to reclaim large audio buffers
+            gc.collect()
 
     async def handle_clone(self, request: web.Request) -> web.Response:
         """POST /api/v1/tts/clone."""
@@ -273,13 +306,47 @@ class RemoteRelay:
         ws = web.WebSocketResponse(max_msg_size=50 * 1024 * 1024)
         await ws.prepare(request)
 
+        debug_event("tunnel_connect", remote=request.remote)
         logger.info("New WebSocket tunnel connection from %s", request.remote)
 
         # Wrap aiohttp WebSocket to match websockets interface
         adapter = AioHTTPWebSocketAdapter(ws)
         await self.tunnel_server.handle_connection(adapter)
 
+        debug_event("tunnel_disconnect", remote=request.remote)
         return ws
+
+    async def handle_debug_ws(self, request: web.Request) -> web.WebSocketResponse:
+        """WebSocket endpoint for live debug events."""
+        ws = web.WebSocketResponse()
+        await ws.prepare(request)
+
+        # Send recent history
+        for entry in _debug_log:
+            try:
+                await ws.send_json(entry)
+            except Exception:
+                break
+
+        _debug_subscribers.add(ws)
+        try:
+            async for msg in ws:
+                pass  # Just keep connection alive
+        finally:
+            _debug_subscribers.discard(ws)
+        return ws
+
+    async def handle_debug_http(self, request: web.Request) -> web.Response:
+        """GET /api/v1/debug — recent debug events as JSON."""
+        import resource
+        mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Linux: KB→MB
+        return web.json_response({
+            "mem_rss_mb": round(mem_mb, 1),
+            "tunnel_connected": self.tunnel_server.has_client,
+            "pending_requests": len(self.tunnel_server._pending_requests),
+            "uptime_seconds": round(time.time() - self.start_time, 1),
+            "recent_events": list(_debug_log)[-50:],
+        })
 
     def create_app(self) -> web.Application:
         """Create the aiohttp application with all routes.
@@ -299,6 +366,10 @@ class RemoteRelay:
 
         # WebSocket tunnel endpoint
         app.router.add_get("/ws/tunnel", self.handle_websocket_tunnel)
+
+        # Debug endpoints (no auth required — internal use)
+        app.router.add_get("/ws/debug", self.handle_debug_ws)
+        app.router.add_get("/api/v1/debug", self.handle_debug_http)
 
         return app
 
@@ -338,6 +409,11 @@ class AioHTTPWebSocketAdapter:
         finally:
             self._closed = True
 
+    @property
+    def closed(self) -> bool:
+        """Whether the connection is closed."""
+        return self._closed or self._ws.closed
+
     async def recv(self) -> str:
         """Receive a message."""
         if self._receive_task is None:
@@ -348,7 +424,14 @@ class AioHTTPWebSocketAdapter:
         if self._closed and self._queue.empty():
             raise ConnectionError("WebSocket closed")
 
-        return await self._queue.get()
+        # Don't wait forever — check periodically if connection died
+        while True:
+            try:
+                return await asyncio.wait_for(self._queue.get(), timeout=5.0)
+            except asyncio.TimeoutError:
+                if self._closed or self._ws.closed:
+                    raise ConnectionError("WebSocket closed")
+                continue
 
     async def send(self, data: str) -> None:
         """Send a message."""
