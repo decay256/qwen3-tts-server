@@ -24,6 +24,7 @@ class VoiceProfile:
     voice_type: str  # "cloned", "designed", "builtin"
     reference_audio: Optional[str] = None
     description: Optional[str] = None
+    ref_text: Optional[str] = None  # transcript of reference audio for clone voices
 
 # Default audiobook voice cast
 DEFAULT_VOICE_CAST: dict[str, dict] = {
@@ -85,6 +86,7 @@ class VoiceManager:
                     voice_type=entry["voice_type"],
                     reference_audio=entry.get("reference_audio"),
                     description=entry.get("description"),
+                    ref_text=entry.get("ref_text"),
                 )
                 self._voices[profile.voice_id] = profile
             logger.info("Loaded %d voices from catalog", len(self._voices))
