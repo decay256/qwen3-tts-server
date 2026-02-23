@@ -303,7 +303,21 @@ class TunnelServer:
                 logger.warning("Tunnel auth failed from %s", websocket.remote_address)
                 return
 
-            # Authenticated
+            # Authenticated — kick any existing clients (only one GPU at a time)
+            if self._clients:
+                for old_id, old_ws in list(self._clients.items()):
+                    logger.warning("Kicking stale client %s to make room for new connection", old_id)
+                    try:
+                        await old_ws.close(4001, "Replaced by new connection")
+                    except Exception:
+                        pass
+                    # Cancel any pending requests on the old connection
+                    for req_id, future in list(self._pending_requests.items()):
+                        if not future.done():
+                            future.set_exception(ConnectionError("Tunnel client replaced"))
+                    self._pending_requests.clear()
+                self._clients.clear()
+
             self._client_counter += 1
             client_id = f"client_{self._client_counter}"
             self._clients[client_id] = websocket
