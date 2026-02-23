@@ -4,6 +4,7 @@ import base64
 import io
 import json
 import logging
+import os
 import subprocess
 import tempfile
 import time
@@ -38,9 +39,21 @@ class TTSEngine:
         self._loaded = False
 
     def load_models(self):
-        """Load enabled models onto GPU."""
+        """Load enabled models onto GPU/CPU."""
         _import_qwen_tts()
         import torch
+
+        # Determine if we're running on CPU
+        is_cpu = config.CUDA_DEVICE == "cpu" or not torch.cuda.is_available()
+        
+        if is_cpu:
+            logger.info("Running in CPU mode - using float32, no flash attention")
+            device_map = "cpu"
+            dtype = torch.float32
+        else:
+            logger.info("Running in GPU mode - using bfloat16, flash attention available")
+            device_map = config.CUDA_DEVICE
+            dtype = torch.bfloat16
 
         for model_key in config.ENABLED_MODELS:
             hf_id = config.MODEL_HF_IDS.get(model_key)
@@ -50,16 +63,22 @@ class TTSEngine:
             logger.info("Loading model %s (%s)...", model_key, hf_id)
             t0 = time.time()
             kwargs = dict(
-                device_map=config.CUDA_DEVICE,
-                dtype=torch.bfloat16,
+                device_map=device_map,
+                dtype=dtype,
             )
-            # Try flash attention, fall back gracefully
-            try:
-                model = Qwen3TTSModel.from_pretrained(
-                    hf_id, attn_implementation="flash_attention_2", **kwargs
-                )
-            except Exception:
-                logger.info("Flash attention unavailable, using default for %s", model_key)
+            
+            # Try flash attention for GPU only, fall back gracefully
+            if not is_cpu:
+                try:
+                    model = Qwen3TTSModel.from_pretrained(
+                        hf_id, attn_implementation="flash_attention_2", **kwargs
+                    )
+                    logger.info("Loaded %s with flash attention", model_key)
+                except Exception as e:
+                    logger.info("Flash attention unavailable (%s), using default for %s", str(e), model_key)
+                    model = Qwen3TTSModel.from_pretrained(hf_id, **kwargs)
+            else:
+                # CPU mode - skip flash attention entirely
                 model = Qwen3TTSModel.from_pretrained(hf_id, **kwargs)
 
             self._models[model_key] = model
@@ -226,31 +245,51 @@ class TTSEngine:
         return voices
 
     def get_health(self) -> dict:
-        """Return model status and GPU info."""
+        """Return model status and hardware info."""
         info = {
             "loaded_models": list(self._models.keys()),
             "status": "ready" if self._loaded else "loading",
+            "device": config.CUDA_DEVICE,
         }
+        
         try:
             import torch
-            if torch.cuda.is_available():
-                dev = int(config.CUDA_DEVICE.split(":")[-1]) if ":" in config.CUDA_DEVICE else 0
-                info["gpu_name"] = torch.cuda.get_device_name(dev)
-                info["vram_used_gb"] = round(torch.cuda.memory_allocated(dev) / 1e9, 2)
-                info["vram_total_gb"] = round(torch.cuda.get_device_properties(dev).total_mem / 1e9, 2)
+            info["torch_version"] = torch.__version__
+            
+            if config.CUDA_DEVICE == "cpu" or not torch.cuda.is_available():
+                # CPU mode
+                info["mode"] = "cpu"
+                info["cpu_count"] = os.cpu_count()
+                try:
+                    # Get memory usage (approximate)
+                    import psutil
+                    memory = psutil.virtual_memory()
+                    info["ram_used_gb"] = round((memory.total - memory.available) / 1e9, 2)
+                    info["ram_total_gb"] = round(memory.total / 1e9, 2)
+                except ImportError:
+                    pass
+            else:
+                # GPU mode
+                info["mode"] = "gpu"
+                if torch.cuda.is_available():
+                    dev = int(config.CUDA_DEVICE.split(":")[-1]) if ":" in config.CUDA_DEVICE else 0
+                    info["gpu_name"] = torch.cuda.get_device_name(dev)
+                    info["vram_used_gb"] = round(torch.cuda.memory_allocated(dev) / 1e9, 2)
+                    info["vram_total_gb"] = round(torch.cuda.get_device_properties(dev).total_mem / 1e9, 2)
+                    
+                    # Try nvidia-smi for temperature
+                    try:
+                        result = subprocess.run(
+                            ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if result.returncode == 0:
+                            info["gpu_temp_c"] = int(result.stdout.strip().split("\n")[0])
+                    except Exception:
+                        pass
+                        
         except Exception as e:
-            info["gpu_error"] = str(e)
-
-        # Try nvidia-smi for temperature
-        try:
-            result = subprocess.run(
-                ["nvidia-smi", "--query-gpu=temperature.gpu", "--format=csv,noheader,nounits"],
-                capture_output=True, text=True, timeout=5
-            )
-            if result.returncode == 0:
-                info["gpu_temp_c"] = int(result.stdout.strip().split("\n")[0])
-        except Exception:
-            pass
+            info["hardware_error"] = str(e)
 
         return info
 
