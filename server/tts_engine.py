@@ -47,9 +47,9 @@ class TTSEngine:
         is_cpu = config.CUDA_DEVICE == "cpu" or not torch.cuda.is_available()
         
         if is_cpu:
-            logger.info("Running in CPU mode - using float32, no flash attention")
+            logger.info("Running in CPU mode - using bfloat16, no flash attention")
             device_map = "cpu"
-            dtype = torch.float32
+            dtype = torch.bfloat16
         else:
             logger.info("Running in GPU mode - using bfloat16, flash attention available")
             device_map = config.CUDA_DEVICE
