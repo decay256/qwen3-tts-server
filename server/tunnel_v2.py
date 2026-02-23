@@ -27,8 +27,8 @@ from .tunnel import TunnelMessage, MessageType  # Reuse existing message types
 logger = logging.getLogger(__name__)
 
 # Connection constants
-HEARTBEAT_INTERVAL = 15  # seconds (faster detection)
-HEARTBEAT_TIMEOUT = 30   # seconds
+HEARTBEAT_INTERVAL = 20  # seconds
+HEARTBEAT_TIMEOUT = 40   # seconds
 RECONNECT_BASE_DELAY = 0.5  # seconds (start faster)
 RECONNECT_MAX_DELAY = 120   # seconds (longer max for persistent issues)
 CONNECTION_TIMEOUT = 10     # seconds
@@ -329,8 +329,8 @@ class EnhancedTunnelClient:
                         self._last_heartbeat_ack = time.time()
                         
                     elif self.on_message:
-                        # Forward message to handler
-                        await asyncio.create_task(self.on_message(message))
+                        # Forward message to handler (don't await — keep message loop responsive for heartbeats)
+                        asyncio.create_task(self.on_message(message))
                         
                 except Exception as e:
                     logger.error("Error processing message: %s", e)

@@ -23,8 +23,8 @@ HEARTBEAT_INTERVAL = 30  # seconds
 RECONNECT_BASE_DELAY = 1  # seconds
 RECONNECT_MAX_DELAY = 60  # seconds
 MESSAGE_TIMEOUT = 120  # 2 minutes max for TTS processing
-HEALTH_PING_INTERVAL = 15  # seconds — relay pings client
-HEALTH_PING_TIMEOUT = 10  # seconds — kill connection if no pong
+HEALTH_PING_INTERVAL = 20  # seconds — relay pings client
+HEALTH_PING_TIMEOUT = 20  # seconds — kill connection if no pong
 
 
 class MessageType(str, Enum):
