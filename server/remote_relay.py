@@ -301,6 +301,141 @@ class RemoteRelay:
         body = await request.text()
         return await self._forward_to_local("POST", "/api/v1/tts/design", body=body)
 
+    async def handle_export_package(self, request: web.Request) -> web.Response:
+        """GET /api/v1/tts/voices/{voice_id}/package — download voice package."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+
+        voice_id = request.match_info["voice_id"]
+        path = f"/api/v1/tts/voices/{voice_id}/package"
+        
+        try:
+            # Forward to local server
+            response = await self.tunnel_server.send_request("GET", path, timeout=60)
+            
+            if response.status_code != 200:
+                return web.Response(
+                    text=response.body or "{}",
+                    status=response.status_code,
+                    content_type="application/json"
+                )
+            
+            # Parse response and extract package data
+            data = json.loads(response.body or "{}")
+            package_b64 = data.get("package")
+            filename = data.get("filename", f"{voice_id}.voicepkg.zip")
+            
+            if not package_b64:
+                return web.json_response({"error": "Invalid package response"}, status=500)
+            
+            # Decode and return as file download
+            package_bytes = base64.b64decode(package_b64)
+            
+            return web.Response(
+                body=package_bytes,
+                content_type="application/zip",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{filename}"',
+                    "Content-Length": str(len(package_bytes)),
+                }
+            )
+            
+        except Exception as e:
+            logger.exception("Error exporting voice package")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_import_package(self, request: web.Request) -> web.Response:
+        """POST /api/v1/tts/voices/import — upload voice package."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+
+        try:
+            # Handle multipart file upload or raw binary body
+            if request.content_type and request.content_type.startswith("multipart/"):
+                reader = await request.multipart()
+                field = await reader.next()
+                if field is None:
+                    return web.json_response({"error": "No file uploaded"}, status=400)
+                
+                package_data = await field.read()
+            else:
+                # Assume raw binary upload
+                package_data = await request.read()
+                
+            if not package_data:
+                return web.json_response({"error": "Empty package data"}, status=400)
+                
+            # Encode as base64 for tunnel transport
+            package_b64 = base64.b64encode(package_data).decode("ascii")
+            
+            # Forward to local server
+            request_body = json.dumps({"package": package_b64})
+            response = await self.tunnel_server.send_request(
+                "POST", "/api/v1/tts/voices/import", 
+                body=request_body, timeout=120
+            )
+            
+            return web.Response(
+                text=response.body or "{}",
+                status=response.status_code,
+                content_type="application/json"
+            )
+            
+        except Exception as e:
+            logger.exception("Error importing voice package")
+            return web.json_response({"error": str(e)}, status=500)
+
+    async def handle_sync_packages(self, request: web.Request) -> web.Response:
+        """POST /api/v1/tts/voices/sync — sync all voices from GPU server to relay."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+
+        try:
+            # Forward sync request to local server
+            response = await self.tunnel_server.send_request(
+                "POST", "/api/v1/tts/voices/sync", 
+                timeout=300  # Extended timeout for bulk export
+            )
+            
+            if response.status_code != 200:
+                return web.Response(
+                    text=response.body or "{}",
+                    status=response.status_code,
+                    content_type="application/json"
+                )
+                
+            # Parse response with all packages
+            data = json.loads(response.body or "{}")
+            packages = data.get("packages", {})
+            
+            # Store packages locally (in memory for now, could persist to disk)
+            # This is where you might save packages to local storage on the relay
+            logger.info(f"Received {len(packages)} voice packages from GPU server")
+            
+            return web.json_response({
+                "synced": len(packages),
+                "voices": list(packages.keys())
+            })
+            
+        except Exception as e:
+            logger.exception("Error syncing voice packages")
+            return web.json_response({"error": str(e)}, status=500)
+
     async def handle_websocket_tunnel(self, request: web.Request) -> web.WebSocketResponse:
         """WebSocket endpoint for tunnel connections from local GPU machines."""
         ws = web.WebSocketResponse(max_msg_size=50 * 1024 * 1024)
@@ -363,6 +498,11 @@ class RemoteRelay:
         app.router.add_post("/api/v1/tts/clone", self.handle_clone)
         app.router.add_post("/api/v1/tts/design", self.handle_design)
         app.router.add_delete("/api/v1/tts/voices/{voice_id}", self.handle_delete_voice)
+        
+        # Voice package routes
+        app.router.add_get("/api/v1/tts/voices/{voice_id}/package", self.handle_export_package)
+        app.router.add_post("/api/v1/tts/voices/import", self.handle_import_package)
+        app.router.add_post("/api/v1/tts/voices/sync", self.handle_sync_packages)
 
         # WebSocket tunnel endpoint
         app.router.add_get("/ws/tunnel", self.handle_websocket_tunnel)

@@ -8,6 +8,7 @@ import shutil
 import uuid
 from pathlib import Path
 from typing import Optional
+from datetime import datetime
 
 from dataclasses import dataclass
 
@@ -25,6 +26,28 @@ class VoiceProfile:
     reference_audio: Optional[str] = None
     description: Optional[str] = None
     ref_text: Optional[str] = None  # transcript of reference audio for clone voices
+    design_description: Optional[str] = None  # original design description for voice design
+    design_language: Optional[str] = None  # language used for voice design
+    source: Optional[str] = None  # "voice_design", "user_upload", "clone", etc.
+    casting_notes: Optional[str] = None  # notes about how this voice should be used
+    created_at: Optional[str] = None  # ISO datetime when voice was created
+    display_name: Optional[str] = None  # display name (e.g., "Maya (Cloned)")
+
+    def get_metadata_dict(self) -> dict:
+        """Get all metadata as a dict suitable for packaging."""
+        return {
+            "voice_id": self.voice_id,
+            "name": self.name,
+            "display_name": self.display_name or self.name,
+            "voice_type": self.voice_type,
+            "description": self.description,
+            "ref_text": self.ref_text,
+            "design_description": self.design_description,
+            "design_language": self.design_language,
+            "source": self.source,
+            "casting_notes": self.casting_notes,
+            "created_at": self.created_at,
+        }
 
 # Default audiobook voice cast
 DEFAULT_VOICE_CAST: dict[str, dict] = {
@@ -87,6 +110,12 @@ class VoiceManager:
                     reference_audio=entry.get("reference_audio"),
                     description=entry.get("description"),
                     ref_text=entry.get("ref_text"),
+                    design_description=entry.get("design_description"),
+                    design_language=entry.get("design_language"),
+                    source=entry.get("source"),
+                    casting_notes=entry.get("casting_notes"),
+                    created_at=entry.get("created_at"),
+                    display_name=entry.get("display_name"),
                 )
                 self._voices[profile.voice_id] = profile
             logger.info("Loaded %d voices from catalog", len(self._voices))
@@ -102,10 +131,25 @@ class VoiceManager:
                 "name": v.name,
                 "voice_type": v.voice_type,
             }
+            # Only include non-None values to keep catalog clean
             if v.reference_audio:
                 entry["reference_audio"] = v.reference_audio
             if v.description:
                 entry["description"] = v.description
+            if v.ref_text:
+                entry["ref_text"] = v.ref_text
+            if v.design_description:
+                entry["design_description"] = v.design_description
+            if v.design_language:
+                entry["design_language"] = v.design_language
+            if v.source:
+                entry["source"] = v.source
+            if v.casting_notes:
+                entry["casting_notes"] = v.casting_notes
+            if v.created_at:
+                entry["created_at"] = v.created_at
+            if v.display_name and v.display_name != v.name:
+                entry["display_name"] = v.display_name
             data.append(entry)
 
         self._catalog_path.write_text(
@@ -179,6 +223,9 @@ class VoiceManager:
             name=name,
             voice_type="cloned",
             reference_audio=str(dest),
+            display_name=f"{name} (Cloned)",
+            source="clone",
+            created_at=datetime.now().isoformat() + "Z",
         )
         self._voices[voice_id] = profile
         self._save_catalog()
@@ -206,6 +253,9 @@ class VoiceManager:
             name=name,
             voice_type="cloned",
             reference_audio=str(dest),
+            display_name=f"{name} (Cloned)",
+            source="user_upload",
+            created_at=datetime.now().isoformat() + "Z",
         )
         self._voices[voice_id] = profile
         self._save_catalog()
@@ -213,12 +263,13 @@ class VoiceManager:
         logger.info("Cloned voice '%s' (id=%s) from uploaded audio", name, voice_id)
         return profile
 
-    def design_voice(self, description: str, name: Optional[str] = None) -> VoiceProfile:
+    def design_voice(self, description: str, name: Optional[str] = None, language: str = "English") -> VoiceProfile:
         """Design a voice from a text description.
 
         Args:
             description: Natural language description of the voice.
             name: Optional name; auto-generated if not provided.
+            language: Language for voice design.
 
         Returns:
             The new VoiceProfile.
@@ -234,6 +285,10 @@ class VoiceManager:
             name=name,
             voice_type="designed",
             description=description,
+            design_description=description,
+            design_language=language,
+            source="voice_design",
+            created_at=datetime.now().isoformat() + "Z",
         )
         self._voices[voice_id] = profile
         self._save_catalog()

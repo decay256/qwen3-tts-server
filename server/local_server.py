@@ -22,6 +22,7 @@ from server.tts_engine import TTSEngine
 from server.tunnel import MessageType, TunnelMessage
 from server.tunnel_v2 import EnhancedTunnelClient
 from server.voice_manager import VoiceManager, VoiceProfile
+from server.voice_packager import VoicePackager
 
 logger = logging.getLogger(__name__)
 
@@ -87,6 +88,9 @@ class LocalServer:
         # Initialize voice manager
         voices_dir = local_cfg.get("voices_dir", "./voices")
         self.voice_manager = VoiceManager(voices_dir, engine=self.engine)
+        
+        # Initialize voice packager
+        self.voice_packager = VoicePackager(self.voice_manager)
 
         # Build tunnel URL
         remote = config["remote"]
@@ -196,6 +200,12 @@ class LocalServer:
                 return await self._handle_design(request)
             elif path.startswith("/api/v1/tts/voices/") and method == "DELETE":
                 return await self._handle_delete_voice(request)
+            elif path.startswith("/api/v1/tts/voices/") and path.endswith("/package") and method == "GET":
+                return await self._handle_export_package(request)
+            elif path == "/api/v1/tts/voices/import" and method == "POST":
+                return await self._handle_import_package(request)
+            elif path == "/api/v1/tts/voices/sync" and method == "POST":
+                return await self._handle_sync_packages(request)
             else:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
@@ -434,6 +444,9 @@ class LocalServer:
         audio_bytes = base64.b64decode(audio_b64)
         profile = self.voice_manager.clone_voice_from_bytes(audio_bytes, voice_name)
 
+        # Auto-sync the new voice to relay
+        asyncio.create_task(self._auto_sync_voice(profile.voice_id))
+
         return TunnelMessage(
             type=MessageType.RESPONSE,
                 request_id=request.request_id,
@@ -516,6 +529,180 @@ class LocalServer:
             body_binary=True,
             headers={"Content-Type": "application/json"},
         )
+
+    async def _handle_export_package(self, request: TunnelMessage) -> TunnelMessage:
+        """Handle GET /api/v1/tts/voices/{voice_id}/package."""
+        path = request.path or ""
+        voice_id = path.split("/")[-2]  # Extract voice_id from path like /api/v1/tts/voices/{voice_id}/package
+
+        if not voice_id:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=400,
+                body=json.dumps({"error": "voice_id required"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+        try:
+            package_path = self.voice_packager.export_package(voice_id)
+            with open(package_path, "rb") as f:
+                package_data = f.read()
+            
+            # Clean up temp file
+            package_path.unlink()
+            
+            # Return as base64 for tunnel transport
+            package_b64 = base64.b64encode(package_data).decode("ascii")
+
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                body=json.dumps({
+                    "package": package_b64,
+                    "filename": f"{voice_id}.voicepkg.zip",
+                }),
+                body_binary=True,
+                headers={"Content-Type": "application/json"},
+            )
+
+        except ValueError as e:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=404,
+                body=json.dumps({"error": str(e)}),
+                headers={"Content-Type": "application/json"},
+            )
+        except Exception as e:
+            logger.exception("Error exporting voice package")
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=500,
+                body=json.dumps({"error": f"Export failed: {str(e)}"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+    async def _handle_import_package(self, request: TunnelMessage) -> TunnelMessage:
+        """Handle POST /api/v1/tts/voices/import."""
+        if not request.body:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=400,
+                body=json.dumps({"error": "Missing request body"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+        try:
+            data = json.loads(request.body)
+            package_b64 = data.get("package")
+
+            if not package_b64:
+                return TunnelMessage(
+                    type=MessageType.RESPONSE,
+                    request_id=request.request_id,
+                    status_code=400,
+                    body=json.dumps({"error": "Missing 'package' field (base64 encoded zip)"}),
+                    headers={"Content-Type": "application/json"},
+                )
+
+            # Decode package data
+            package_data = base64.b64decode(package_b64)
+            
+            # Import the package
+            profile = self.voice_packager.import_package(package_data)
+
+            # Send auto-sync notification to relay (fire and forget)
+            asyncio.create_task(self._auto_sync_voice(profile.voice_id))
+
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                body=json.dumps({
+                    "voice_id": profile.voice_id,
+                    "name": profile.name,
+                    "type": profile.voice_type,
+                    "imported": True,
+                }),
+                headers={"Content-Type": "application/json"},
+            )
+
+        except ValueError as e:
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=400,
+                body=json.dumps({"error": str(e)}),
+                headers={"Content-Type": "application/json"},
+            )
+        except Exception as e:
+            logger.exception("Error importing voice package")
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=500,
+                body=json.dumps({"error": f"Import failed: {str(e)}"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+    async def _handle_sync_packages(self, request: TunnelMessage) -> TunnelMessage:
+        """Handle POST /api/v1/tts/voices/sync - export all voices and send to relay."""
+        try:
+            # Export all voice packages to temporary directory
+            import tempfile
+            with tempfile.TemporaryDirectory() as temp_dir:
+                packages = self.voice_packager.export_all(temp_dir)
+                
+                # Read all packages and encode as base64
+                package_data = {}
+                for package_path in packages:
+                    voice_id = package_path.stem.replace(".voicepkg", "")
+                    with open(package_path, "rb") as f:
+                        package_bytes = f.read()
+                    package_data[voice_id] = base64.b64encode(package_bytes).decode("ascii")
+
+                return TunnelMessage(
+                    type=MessageType.RESPONSE,
+                    request_id=request.request_id,
+                    body=json.dumps({
+                        "synced_voices": len(package_data),
+                        "packages": package_data,
+                    }),
+                    body_binary=True,
+                    headers={"Content-Type": "application/json"},
+                )
+
+        except Exception as e:
+            logger.exception("Error syncing voice packages")
+            return TunnelMessage(
+                type=MessageType.RESPONSE,
+                request_id=request.request_id,
+                status_code=500,
+                body=json.dumps({"error": f"Sync failed: {str(e)}"}),
+                headers={"Content-Type": "application/json"},
+            )
+
+    async def _auto_sync_voice(self, voice_id: str) -> None:
+        """Auto-sync a single voice package to the relay."""
+        try:
+            logger.info(f"Auto-syncing voice package: {voice_id}")
+            
+            # Export the voice package
+            package_path = self.voice_packager.export_package(voice_id)
+            with open(package_path, "rb") as f:
+                package_data = f.read()
+            
+            # Clean up temp file
+            package_path.unlink()
+            
+            # Send sync notification to relay (this would be implementation-specific)
+            # For now, we just log it - the relay would need to implement this endpoint
+            logger.info(f"Voice package {voice_id} ready for sync ({len(package_data)} bytes)")
+            
+        except Exception as e:
+            logger.error(f"Failed to auto-sync voice {voice_id}: {e}")
 
 
 def setup_logging(config: dict) -> None:
