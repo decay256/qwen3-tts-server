@@ -1,0 +1,5 @@
+{
+  "text": "Hello world! This is a test of CPU-based text to speech synthesis using the Qwen3 TTS model.",
+  "voice_id": "designed_c991c176ea1a",
+  "instructions": "Speak clearly and warmly"
+}

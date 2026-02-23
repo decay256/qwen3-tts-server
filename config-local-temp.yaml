@@ -1,0 +1,9 @@
+api_key: "test-local-key-12345"
+remote:
+  host: "localhost"
+  port: 9800
+  tls: false
+local:
+  voices_dir: "./voices"
+logging:
+  level: DEBUG
