@@ -171,7 +171,71 @@ class TTSEngine:
         finally:
             Path(ref_path).unlink(missing_ok=True)
 
-    # ── Clone with cached prompt ─────────────────────────────────────
+    # ── Clone prompt creation ───────────────────────────────────────
+    def create_clone_prompt(
+        self,
+        ref_audio_b64: str,
+        ref_text: str = "",
+        x_vector_only_mode: bool = False,
+    ) -> object:
+        """Create a reusable voice clone prompt from reference audio.
+
+        Returns a VoiceClonePromptItem that can be serialized and reused.
+
+        Args:
+            ref_audio_b64: Base64-encoded reference audio.
+            ref_text: Transcript of reference audio (required unless x_vector_only_mode).
+            x_vector_only_mode: If True, only extract speaker embedding.
+
+        Returns:
+            VoiceClonePromptItem (list of one item).
+        """
+        model_key = "base" if "base" in self._models else "base_small"
+        model = self.get_model(model_key)
+
+        audio_bytes = base64.b64decode(ref_audio_b64)
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as f:
+            f.write(audio_bytes)
+            ref_path = f.name
+
+        try:
+            prompt_items = model.create_voice_clone_prompt(
+                ref_audio=ref_path,
+                ref_text=ref_text if ref_text else None,
+                x_vector_only_mode=x_vector_only_mode,
+            )
+            # Returns list of VoiceClonePromptItem — we want the single item
+            return prompt_items[0] if isinstance(prompt_items, list) else prompt_items
+        finally:
+            Path(ref_path).unlink(missing_ok=True)
+
+    def synthesize_with_clone_prompt(
+        self,
+        text: str,
+        prompt_item: object,  # VoiceClonePromptItem
+        language: str = "Auto",
+    ) -> tuple[np.ndarray, int]:
+        """Synthesize speech using a saved clone prompt.
+
+        Args:
+            text: Text to synthesize.
+            prompt_item: VoiceClonePromptItem from create_clone_prompt() or loaded from disk.
+            language: Target language.
+
+        Returns:
+            (audio_array, sample_rate) tuple.
+        """
+        model_key = "base" if "base" in self._models else "base_small"
+        model = self.get_model(model_key)
+
+        wavs, sr = model.generate_voice_clone(
+            text=text,
+            language=language,
+            voice_clone_prompt=[prompt_item],
+        )
+        return wavs[0], sr
+
+    # ── Legacy: Clone with saved voice (deprecated) ──────────────────
     def generate_with_saved_voice(
         self,
         text: str,

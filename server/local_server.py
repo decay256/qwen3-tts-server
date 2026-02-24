@@ -23,6 +23,7 @@ from server.tunnel import MessageType, TunnelMessage
 from server.tunnel_v2 import EnhancedTunnelClient
 from server.voice_manager import VoiceManager, VoiceProfile
 from server.voice_packager import VoicePackager
+from server.prompt_store import PromptStore
 
 logger = logging.getLogger(__name__)
 
@@ -91,6 +92,10 @@ class LocalServer:
         
         # Initialize voice packager
         self.voice_packager = VoicePackager(self.voice_manager)
+
+        # Initialize clone prompt store
+        prompts_dir = local_cfg.get("prompts_dir", "./voice-prompts")
+        self.prompt_store = PromptStore(prompts_dir)
 
         # Build tunnel URL
         remote = config["remote"]
@@ -207,6 +212,17 @@ class LocalServer:
                 return await self._handle_import_package(request)
             elif path == "/api/v1/tts/voices/sync" and method == "POST":
                 return await self._handle_sync_packages(request)
+            # Clone prompt endpoints
+            elif path == "/api/v1/voices/design" and method == "POST":
+                return await self._handle_voice_design(request)
+            elif path == "/api/v1/voices/clone-prompt" and method == "POST":
+                return await self._handle_create_clone_prompt(request)
+            elif path == "/api/v1/voices/prompts" and method == "GET":
+                return await self._handle_list_prompts(request)
+            elif path.startswith("/api/v1/voices/prompts/") and method == "DELETE":
+                return await self._handle_delete_prompt(request)
+            elif path == "/api/v1/tts/clone-prompt" and method == "POST":
+                return await self._handle_synthesize_with_prompt(request)
             else:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
@@ -236,6 +252,7 @@ class LocalServer:
             "vram_total_gb": gpu_info.get("vram_total_gb", 0),
             "models_loaded": gpu_info.get("loaded_models", []),
             "voices_count": len(self.voice_manager.list_voices()),
+            "prompts_count": len(self.prompt_store.list_prompts()),
             "uptime_seconds": round(uptime, 1),
             "engine_ready": self.engine.is_loaded,
             # Enhanced tunnel health information
@@ -693,6 +710,197 @@ class LocalServer:
                 body=json.dumps({"error": f"Sync failed: {str(e)}"}),
                 headers={"Content-Type": "application/json"},
             )
+
+    # ── Clone Prompt Endpoints ─────────────────────────────────────
+
+    def _require_base_model(self, request: TunnelMessage) -> TunnelMessage | None:
+        """Check if base model is loaded. Returns error response if not, None if OK."""
+        if not self.engine.is_loaded:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=503, body=json.dumps({"error": "TTS engine not loaded"}),
+            )
+        has_base = "base" in self.engine._models or "base_small" in self.engine._models
+        if not has_base:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=503,
+                body=json.dumps({"error": "Base model not loaded. Enable it via ENABLED_MODELS=base,voice_design"}),
+            )
+        return None
+
+    async def _handle_voice_design(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/voices/design — generate reference clip via VoiceDesign."""
+        if not self.engine.is_loaded:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=503, body=json.dumps({"error": "TTS engine not loaded"}),
+            )
+
+        body = json.loads(request.body) if request.body else {}
+        text = body.get("text")
+        instruct = body.get("instruct")
+        language = body.get("language", "English")
+        fmt = body.get("format", "wav")
+
+        if not text or not instruct:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'text' and 'instruct'"}),
+            )
+
+        import functools
+        from server.tts_engine import wav_to_format
+
+        loop = asyncio.get_event_loop()
+        func = functools.partial(self.engine.generate_voice_design, text=text, description=instruct, language=language)
+        wav, sr = await loop.run_in_executor(None, func)
+
+        audio_bytes = wav_to_format(wav, sr, fmt)
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"audio": audio_b64, "format": fmt, "sample_rate": sr, "duration_s": round(len(wav) / sr, 2)}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_create_clone_prompt(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/voices/clone-prompt — create persistent clone prompt."""
+        err = self._require_base_model(request)
+        if err:
+            return err
+
+        body = json.loads(request.body) if request.body else {}
+        name = body.get("name")
+        ref_audio_b64 = body.get("ref_audio_base64")
+        ref_text = body.get("ref_text", "")
+        tags = body.get("tags", [])
+
+        if not name:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'name'"}),
+            )
+        if not ref_audio_b64:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'ref_audio_base64'"}),
+            )
+
+        import functools
+
+        loop = asyncio.get_event_loop()
+
+        # Calculate ref audio duration
+        import io, soundfile as sf
+        audio_bytes = base64.b64decode(ref_audio_b64)
+        audio_data, audio_sr = sf.read(io.BytesIO(audio_bytes))
+        duration_s = round(len(audio_data) / audio_sr, 2)
+
+        # Create clone prompt (CPU-heavy)
+        func = functools.partial(
+            self.engine.create_clone_prompt,
+            ref_audio_b64=ref_audio_b64,
+            ref_text=ref_text,
+            x_vector_only_mode=not bool(ref_text),
+        )
+        prompt_item = await loop.run_in_executor(None, func)
+
+        # Save to prompt store
+        meta = self.prompt_store.save_prompt(
+            name=name,
+            prompt_item=prompt_item,
+            tags=tags,
+            ref_text=ref_text,
+            ref_audio_duration_s=duration_s,
+        )
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"name": name, "status": "created", "metadata": meta.to_dict()}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_list_prompts(self, request: TunnelMessage) -> TunnelMessage:
+        """GET /api/v1/voices/prompts — list saved clone prompts."""
+        # Parse query params from path (e.g. /api/v1/voices/prompts?tags=maya,angry)
+        tags = None
+        path = request.path or ""
+        if "?" in path:
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(path).query)
+            if "tags" in qs:
+                tags = qs["tags"][0].split(",")
+
+        prompts = self.prompt_store.list_prompts(tags=tags)
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"prompts": prompts, "count": len(prompts)}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_delete_prompt(self, request: TunnelMessage) -> TunnelMessage:
+        """DELETE /api/v1/voices/prompts/{name} — delete a clone prompt."""
+        path = request.path or ""
+        name = path.rsplit("/", 1)[-1]
+
+        deleted = self.prompt_store.delete_prompt(name)
+        if not deleted:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=404, body=json.dumps({"error": f"Prompt '{name}' not found"}),
+            )
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"name": name, "status": "deleted"}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_synthesize_with_prompt(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/tts/clone-prompt — synthesize with saved clone prompt."""
+        err = self._require_base_model(request)
+        if err:
+            return err
+
+        body = json.loads(request.body) if request.body else {}
+        text = body.get("text")
+        voice_prompt = body.get("voice_prompt")
+        language = body.get("language", "Auto")
+        fmt = body.get("format", "wav")
+
+        if not text or not voice_prompt:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'text' and 'voice_prompt'"}),
+            )
+
+        # Load cached prompt
+        try:
+            device = "cpu" if "cpu" in str(getattr(self.engine, '_device', 'cpu')) else "cuda"
+            prompt_item = self.prompt_store.load_prompt(voice_prompt, device=device)
+        except FileNotFoundError:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=404, body=json.dumps({"error": f"Clone prompt '{voice_prompt}' not found"}),
+            )
+
+        import functools
+        from server.tts_engine import wav_to_format
+
+        loop = asyncio.get_event_loop()
+        func = functools.partial(self.engine.synthesize_with_clone_prompt, text=text, prompt_item=prompt_item, language=language)
+        wav, sr = await loop.run_in_executor(None, func)
+
+        audio_bytes = wav_to_format(wav, sr, fmt)
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"audio": audio_b64, "format": fmt, "sample_rate": sr, "duration_s": round(len(wav) / sr, 2)}),
+            headers={"Content-Type": "application/json"},
+        )
 
     async def _auto_sync_voice(self, voice_id: str) -> None:
         """Auto-sync a single voice package to the relay."""
