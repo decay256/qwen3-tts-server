@@ -233,6 +233,9 @@ class LocalServer:
                 return await self._handle_cast_voice(request)
             elif path == "/api/v1/voices/emotions" and method == "GET":
                 return await self._handle_list_emotions(request)
+            # Audio processing
+            elif path == "/api/v1/audio/normalize" and method == "POST":
+                return await self._handle_normalize(request)
             else:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
@@ -1201,6 +1204,60 @@ class LocalServer:
             body=batch_body,
         )
         return await self._handle_batch_design(batch_request)
+
+    # ── Audio Processing ────────────────────────────────────────────
+
+    async def _handle_normalize(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/audio/normalize — formant-normalize audio.
+
+        Request body::
+
+            {
+                "target_audio_base64": "...",
+                "reference_audio_base64": "...",
+                "strength": 0.7,  // 0.0-1.0, default 0.7
+                "format": "wav"
+            }
+        """
+        body = json.loads(request.body) if request.body else {}
+        target_b64 = body.get("target_audio_base64")
+        ref_b64 = body.get("reference_audio_base64")
+        strength = body.get("strength", 0.7)
+        fmt = body.get("format", "wav")
+
+        if not target_b64 or not ref_b64:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400,
+                body=json.dumps({"error": "Missing 'target_audio_base64' and 'reference_audio_base64'"}),
+            )
+
+        import functools
+        from server.audio_normalize import normalize_audio_bytes
+        from server.tts_engine import wav_to_format
+
+        loop = asyncio.get_event_loop()
+        target_bytes = base64.b64decode(target_b64)
+        ref_bytes = base64.b64decode(ref_b64)
+
+        func = functools.partial(normalize_audio_bytes, target_bytes, ref_bytes, strength=strength)
+        wav_bytes, sr = await loop.run_in_executor(None, func)
+
+        # Convert to requested format
+        if fmt != "wav":
+            import io, numpy as np, soundfile as sf
+            audio_data, audio_sr = sf.read(io.BytesIO(wav_bytes))
+            audio_bytes = wav_to_format(audio_data.astype(np.float32), audio_sr, fmt)
+        else:
+            audio_bytes = wav_bytes
+
+        audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"audio": audio_b64, "format": fmt, "sample_rate": sr}),
+            headers={"Content-Type": "application/json"},
+        )
 
     async def _auto_sync_voice(self, voice_id: str) -> None:
         """Auto-sync a single voice package to the relay."""

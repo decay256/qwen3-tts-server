@@ -564,6 +564,17 @@ class RemoteRelay:
         body = await request.text()
         return await self._forward_to_local("POST", "/api/v1/voices/cast", body=body)
 
+    async def handle_normalize(self, request: web.Request) -> web.Response:
+        """POST /api/v1/audio/normalize — formant normalization."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        return await self._forward_to_local("POST", "/api/v1/audio/normalize", body=body)
+
     async def handle_batch_design(self, request: web.Request) -> web.Response:
         """POST /api/v1/voices/design/batch — batch generate reference clips."""
         auth_error = await self._require_auth(request)
@@ -607,6 +618,9 @@ class RemoteRelay:
         app.router.add_get("/api/v1/tts/voices/{voice_id}/package", self.handle_export_package)
         app.router.add_post("/api/v1/tts/voices/import", self.handle_import_package)
         app.router.add_post("/api/v1/tts/voices/sync", self.handle_sync_packages)
+
+        # Audio processing
+        app.router.add_post("/api/v1/audio/normalize", self.handle_normalize)
 
         # Clone prompt routes
         app.router.add_get("/api/v1/voices/emotions", self.handle_list_emotions)
