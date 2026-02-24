@@ -116,18 +116,23 @@ def test_catalog_persistence(voice_dir):
     assert vm2.list_voices()[0]["name"] == "Persist"
 
 
-def test_initialize_default_cast(vm):
-    vm.initialize_default_cast()
+def test_initialize_voices_from_config(vm):
+    config = {
+        "hero": {"description": "Brave young male voice"},
+        "villain": {"description": "Deep menacing voice"},
+    }
+    vm.initialize_voices_from_config(config)
     voices = vm.list_voices()
     names = {v["name"] for v in voices}
-    assert "Narrator" in names
-    assert "Maya" in names
-    assert len(voices) == 6  # DEFAULT_VOICE_CAST has 6 entries
+    assert "hero" in names
+    assert "villain" in names
+    assert len(voices) == 2
 
 
-def test_initialize_default_cast_idempotent(vm):
-    vm.initialize_default_cast()
+def test_initialize_voices_from_config_idempotent(vm):
+    config = {"hero": {"description": "Brave young male voice"}}
+    vm.initialize_voices_from_config(config)
     count1 = len(vm.list_voices())
-    vm.initialize_default_cast()  # second call should not duplicate
+    vm.initialize_voices_from_config(config)  # second call should not duplicate
     count2 = len(vm.list_voices())
     assert count1 == count2

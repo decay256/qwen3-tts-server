@@ -121,9 +121,10 @@ class LocalServer:
             logger.exception("Failed to load models")
             logger.warning("Continuing without models (API will return errors for TTS requests)")
 
-        # Initialize default voice cast
+        # Initialize voices from config (if provided)
         cast_config = self.config.get("voice_cast")
-        self.voice_manager.initialize_default_cast(cast_config)
+        if cast_config:
+            self.voice_manager.initialize_voices_from_config(cast_config)
         logger.info("Voices ready: %d available", len(self.voice_manager.list_voices()))
 
         # Connect to remote relay

@@ -74,7 +74,11 @@ def server(tmp_path, mock_engine):
             srv = LocalServer(config)
             srv.engine = mock_engine
             srv.voice_manager = VoiceManager(str(tmp_path / "voices"), engine=mock_engine)
-            srv.voice_manager.initialize_default_cast()
+            # Initialize test voices from config (no hardcoded novel characters)
+            srv.voice_manager.initialize_voices_from_config({
+                "narrator": {"description": "Deep male narrator voice"},
+                "speaker1": {"description": "Young female voice"},
+            })
             yield srv
 
 
@@ -86,7 +90,7 @@ async def test_handle_status(server):
     data = json.loads(resp.body)
     assert data["status"] == "ok"
     assert data["engine_ready"] is True
-    assert data["voices_count"] == 6
+    assert data["voices_count"] == 2
 
 
 @pytest.mark.asyncio
@@ -95,7 +99,7 @@ async def test_handle_list_voices(server):
     resp = await server._handle_request(req)
     data = json.loads(resp.body)
     assert "voices" in data
-    assert len(data["voices"]) == 6
+    assert len(data["voices"]) == 2
 
 
 @pytest.mark.asyncio
@@ -144,10 +148,10 @@ async def test_handle_design_engine_not_loaded(server):
 @pytest.mark.asyncio
 async def test_handle_synthesize_by_voice_name(server):
     """voice_name resolves to a voice and uses appropriate synthesis path."""
-    # Narrator should exist from initialize_default_cast
+    # narrator should exist from initialize_voices_from_config
     req = make_request("/api/v1/tts/synthesize", body={
         "text": "Hello world",
-        "voice_name": "Narrator",
+        "voice_name": "narrator",
     })
     with patch("server.tts_engine.wav_to_format", return_value=b"audio-data"):
         resp = await server._handle_request(req)
@@ -160,7 +164,7 @@ async def test_handle_synthesize_by_voice_name(server):
 async def test_handle_synthesize_by_voice_id(server):
     """voice_id fallback when voice_name not provided."""
     voices = server.voice_manager.list_voices()
-    narrator = next(v for v in voices if v["name"] == "Narrator")
+    narrator = next(v for v in voices if v["name"] == "narrator")
 
     req = make_request("/api/v1/tts/synthesize", body={
         "text": "Hello world",

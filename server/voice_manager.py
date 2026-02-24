@@ -49,29 +49,6 @@ class VoiceProfile:
             "created_at": self.created_at,
         }
 
-# Default audiobook voice cast
-DEFAULT_VOICE_CAST: dict[str, dict] = {
-    "Narrator": {
-        "description": "Deep, warm male narrator voice with gravitas and clarity",
-    },
-    "Maya": {
-        "description": "Young woman, warm and expressive, slight vulnerability",
-    },
-    "Elena": {
-        "description": "Mature woman, confident and authoritative, Eastern European accent",
-    },
-    "Chen": {
-        "description": "Middle-aged man, calm and analytical, slight Chinese accent",
-    },
-    "Raj": {
-        "description": "Young man, enthusiastic and energetic, Indian accent",
-    },
-    "Kim": {
-        "description": "Young woman, sharp and professional, Korean-American",
-    },
-}
-
-
 class VoiceManager:
     """Manages voice profiles: cloned, designed, and preset voices.
 
@@ -296,21 +273,33 @@ class VoiceManager:
         logger.info("Designed voice '%s' (id=%s): %s", name, voice_id, description[:80])
         return profile
 
-    def initialize_default_cast(self, cast_config: Optional[dict] = None) -> None:
-        """Initialize the default audiobook voice cast if not already present.
+    def initialize_voices_from_config(self, cast_config: dict) -> None:
+        """Initialize voices from a config dict.
+
+        Useful for bootstrapping voices on first run. Only creates voices
+        that don't already exist in the catalog.
 
         Args:
-            cast_config: Voice cast config dict. Uses DEFAULT_VOICE_CAST if None.
-        """
-        cast = cast_config or DEFAULT_VOICE_CAST
+            cast_config: Dict mapping voice names to their config.
+                Each entry should have "description" and optionally "type"
+                ("designed" or "cloned") and "reference_audio".
 
-        for name, info in cast.items():
+        Example config::
+
+            voice_cast:
+              narrator:
+                description: "Deep, warm male voice with gravitas"
+              villain:
+                type: cloned
+                reference_audio: "voices/villain_ref.wav"
+        """
+        for name, info in cast_config.items():
             existing = self.get_voice(name)
             if existing:
                 logger.debug("Voice '%s' already exists, skipping", name)
                 continue
 
-            description = info.get("description", f"Default voice for {name}")
+            description = info.get("description", f"Voice for {name}")
             voice_type = info.get("type", "designed")
 
             if voice_type == "designed":
@@ -318,7 +307,7 @@ class VoiceManager:
             elif voice_type == "cloned" and "reference_audio" in info:
                 self.clone_voice(info["reference_audio"], name)
 
-        logger.info("Default voice cast initialized (%d voices total)", len(self._voices))
+        logger.info("Voice config initialized (%d voices total)", len(self._voices))
 
     def delete_voice(self, voice_id: str) -> bool:
         """Delete a voice profile.
