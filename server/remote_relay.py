@@ -483,6 +483,66 @@ class RemoteRelay:
             "recent_events": list(_debug_log)[-50:],
         })
 
+    # ── Clone Prompt Endpoints (forwarded to local server) ──────────
+
+    async def handle_voice_design(self, request: web.Request) -> web.Response:
+        """POST /api/v1/voices/design — generate reference clip."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        return await self._forward_to_local("POST", "/api/v1/voices/design", body=body)
+
+    async def handle_create_clone_prompt(self, request: web.Request) -> web.Response:
+        """POST /api/v1/voices/clone-prompt — create persistent clone prompt."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        return await self._forward_to_local("POST", "/api/v1/voices/clone-prompt", body=body)
+
+    async def handle_list_prompts(self, request: web.Request) -> web.Response:
+        """GET /api/v1/voices/prompts — list saved clone prompts."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        # Forward query string
+        path = "/api/v1/voices/prompts"
+        if request.query_string:
+            path += f"?{request.query_string}"
+        return await self._forward_to_local("GET", path)
+
+    async def handle_delete_prompt(self, request: web.Request) -> web.Response:
+        """DELETE /api/v1/voices/prompts/{name} — delete a clone prompt."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        name = request.match_info["name"]
+        return await self._forward_to_local("DELETE", f"/api/v1/voices/prompts/{name}")
+
+    async def handle_synthesize_with_prompt(self, request: web.Request) -> web.Response:
+        """POST /api/v1/tts/clone-prompt — synthesize with saved clone prompt."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        return await self._forward_to_local("POST", "/api/v1/tts/clone-prompt", body=body)
+
     def create_app(self) -> web.Application:
         """Create the aiohttp application with all routes.
 
@@ -503,6 +563,13 @@ class RemoteRelay:
         app.router.add_get("/api/v1/tts/voices/{voice_id}/package", self.handle_export_package)
         app.router.add_post("/api/v1/tts/voices/import", self.handle_import_package)
         app.router.add_post("/api/v1/tts/voices/sync", self.handle_sync_packages)
+
+        # Clone prompt routes
+        app.router.add_post("/api/v1/voices/design", self.handle_voice_design)
+        app.router.add_post("/api/v1/voices/clone-prompt", self.handle_create_clone_prompt)
+        app.router.add_get("/api/v1/voices/prompts", self.handle_list_prompts)
+        app.router.add_delete("/api/v1/voices/prompts/{name}", self.handle_delete_prompt)
+        app.router.add_post("/api/v1/tts/clone-prompt", self.handle_synthesize_with_prompt)
 
         # WebSocket tunnel endpoint
         app.router.add_get("/ws/tunnel", self.handle_websocket_tunnel)
