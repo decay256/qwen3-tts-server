@@ -138,8 +138,18 @@ class TTSEngine:
         ref_audio_b64: str,
         ref_text: str = "",
         language: str = "Auto",
+        x_vector_only_mode: bool = False,
     ) -> tuple[np.ndarray, int]:
-        """Clone a voice from reference audio and generate new speech."""
+        """Clone a voice from reference audio and generate new speech.
+        
+        Args:
+            text: Text to synthesize.
+            ref_audio_b64: Base64-encoded reference audio.
+            ref_text: Transcript of the reference audio (required unless x_vector_only_mode).
+            language: Target language.
+            x_vector_only_mode: If True, only use speaker embedding (no ref_text needed,
+                lower quality). Use when ref_text is unavailable.
+        """
         model_key = "base" if "base" in self._models else "base_small"
         model = self.get_model(model_key)
 
@@ -155,6 +165,7 @@ class TTSEngine:
                 language=language,
                 ref_audio=ref_path,
                 ref_text=ref_text,
+                x_vector_only_mode=x_vector_only_mode,
             )
             return wavs[0], sr
         finally:

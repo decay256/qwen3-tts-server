@@ -369,12 +369,21 @@ class LocalServer:
             with open(voice.reference_audio, "rb") as f:
                 ref_b64 = base64.b64encode(f.read()).decode()
             # ref_text must be the transcript of the REFERENCE audio, not the target text.
-            # If not stored, pass empty string — Qwen3-TTS handles it better than a mismatch.
+            # qwen-tts REQUIRES non-empty ref_text in ICL mode (x_vector_only_mode=False).
+            # If no ref_text stored, fall back to x_vector_only_mode (lower quality but works).
             ref_text = voice.ref_text or ""
-            func = functools.partial(
-                self.engine.generate_voice_clone,
-                text=text, ref_audio_b64=ref_b64, ref_text=ref_text, language="Auto",
-            )
+            if ref_text:
+                func = functools.partial(
+                    self.engine.generate_voice_clone,
+                    text=text, ref_audio_b64=ref_b64, ref_text=ref_text, language="Auto",
+                )
+            else:
+                logger.warning("Voice %s has no ref_text — using x_vector_only_mode (lower quality)", voice.name)
+                func = functools.partial(
+                    self.engine.generate_voice_clone,
+                    text=text, ref_audio_b64=ref_b64, ref_text="", language="Auto",
+                    x_vector_only_mode=True,
+                )
         elif voice.voice_type == "designed":
             # Design mode — stochastic, different each time
             description = voice.description or ""
