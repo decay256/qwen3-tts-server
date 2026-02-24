@@ -47,7 +47,8 @@ def test_build_casting_batch_all():
     names = [i["name"] for i in items]
     assert "maya_neutral_light" in names
     assert "maya_angry_full" in names
-    assert "maya_laughing_medium" in names
+    assert "maya_manic_medium" in names
+    assert "maya_exhausted_full" in names
 
 
 def test_build_casting_batch_subset_emotions():

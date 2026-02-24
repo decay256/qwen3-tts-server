@@ -68,15 +68,15 @@ EMOTION_PRESETS: dict[str, EmotionPreset] = {
         ref_text_full="I can't... I just can't believe it! This is the happiest day of my entire life! I'm going to cry, I'm so happy right now!",
         tags=["happy", "joy"],
     ),
-    "excited": EmotionPreset(
-        name="excited",
-        instruct_light="slightly energized, a spark of enthusiasm",
-        instruct_medium="excited, speaking faster, building energy",
-        instruct_full="bursting with excitement, speaking fast, barely containing energy, almost manic",
-        ref_text_light="Oh, interesting! I think we might be onto something here.",
-        ref_text_medium="This is incredible, do you realize what this means? We have to look into this right now!",
-        ref_text_full="Yes! YES! We did it! I can't believe it, this changes EVERYTHING! Come on, come on, we have to tell the others right now!",
-        tags=["excited", "energetic"],
+    "awe": EmotionPreset(
+        name="awe",
+        instruct_light="quietly impressed, a note of wonder creeping in",
+        instruct_medium="breathless, reverent, the scope of it sinking in",
+        instruct_full="overwhelmed, trembling with wonder, barely able to speak",
+        ref_text_light="The symmetry is unusual. Not impossible for natural formation, but unusual enough that I want a full analysis before we rule anything out.",
+        ref_text_medium="It went down for kilometers. Structure after structure, branching and folding in on itself. The geometry was impossible and yet there it was, undeniably real.",
+        ref_text_full="In four billion years of evolution on Earth, nothing had ever built anything like this. It was beautiful in a way that made the word feel inadequate.",
+        tags=["awe", "wonder"],
     ),
     "sad": EmotionPreset(
         name="sad",
@@ -98,15 +98,15 @@ EMOTION_PRESETS: dict[str, EmotionPreset] = {
         ref_text_full="How DARE you! After everything I did for you, after everything I sacrificed, THIS is what I get?! Get out. GET OUT!",
         tags=["angry", "furious"],
     ),
-    "fearful": EmotionPreset(
-        name="fearful",
-        instruct_light="slightly uneasy, a hint of worry creeping in",
-        instruct_medium="scared, voice shaking slightly, growing anxiety",
+    "afraid": EmotionPreset(
+        name="afraid",
+        instruct_light="slightly uneasy, a hint of worry creeping in, something off",
+        instruct_medium="scared, voice shaking slightly, growing anxiety, dread building",
         instruct_full="terrified, voice shaking with panic, hyperventilating, desperate",
-        ref_text_light="I'm not sure about this. Something doesn't feel quite right.",
-        ref_text_medium="Something's wrong. Something's very wrong. We need to get out of here, right now. Please.",
-        ref_text_full="Oh god, oh god, oh god... no no no! We're trapped, we're completely trapped! Someone help us, PLEASE! I can't breathe!",
-        tags=["fearful", "scared", "panic"],
+        ref_text_light="I'm not sure about this. Something doesn't feel quite right. These numbers don't match yesterday's baseline.",
+        ref_text_medium="Something's wrong. Something's very wrong. We need to get out of here, right now. Please, we have to go.",
+        ref_text_full="Oh god, oh god, oh god... no no no! We're trapped! Someone help us, PLEASE! I can't breathe!",
+        tags=["afraid", "scared", "panic"],
     ),
     "tender": EmotionPreset(
         name="tender",
@@ -117,6 +117,26 @@ EMOTION_PRESETS: dict[str, EmotionPreset] = {
         ref_text_medium="Hey... it's okay. I'm right here. You don't have to be strong all the time. I've got you.",
         ref_text_full="I love you. I love you so much it hurts. You are the most important thing in my world, and I need you to know that. Always.",
         tags=["tender", "loving", "gentle"],
+    ),
+    "manic": EmotionPreset(
+        name="manic",
+        instruct_light="energized, pace quickening, building momentum",
+        instruct_medium="rapid, breathless, swept up in escalating events",
+        instruct_full="frenetic, tumbling, events crashing over each other, barely coherent",
+        ref_text_light="The data is coming in faster now. Every scan reveals new structures, new patterns, new questions multiplying faster than answers.",
+        ref_text_medium="Everything is accelerating. The readings are shifting, the patterns are changing, and I'm running between three consoles trying to keep up with all of it.",
+        ref_text_full="Everything happened at once. The alarm. The pressure breach. People shouting coordinates. Every system screaming at once and somehow we had to make sense of all of it.",
+        tags=["manic", "frenetic", "urgent"],
+    ),
+    "exhausted": EmotionPreset(
+        name="exhausted",
+        instruct_light="slightly worn, the energy flagging, end of a long day",
+        instruct_medium="drained, heavy, the weight of sustained effort showing",
+        instruct_full="hollowed out, flat, running on nothing, the soul wrung dry",
+        ref_text_light="I'll finish this in the morning. I keep making mistakes and that's usually my sign to stop.",
+        ref_text_medium="Three weeks of double shifts. Everything feels smaller every day. The work matters more than sleep but the body disagrees.",
+        ref_text_full="There was nothing left to analyze, nothing left to argue about, nothing left at all. Just the hum of machinery and the slow, patient drip of time passing.",
+        tags=["exhausted", "tired", "drained"],
     ),
     "whispering": EmotionPreset(
         name="whispering",
@@ -158,23 +178,17 @@ EMOTION_PRESETS: dict[str, EmotionPreset] = {
         ref_text_full="Oh WOW, what an ABSOLUTELY GENIUS move! Somebody call the Nobel committee! I have NEVER in my LIFE seen such a masterful display of pure, unadulterated brilliance!",
         tags=["sarcastic", "ironic"],
     ),
-    "nervous": EmotionPreset(
-        name="nervous",
-        instruct_light="slightly hesitant, a touch of uncertainty",
-        instruct_medium="anxious, voice slightly unsteady, hesitant",
-        instruct_full="stammering with anxiety, voice cracking, on the verge of panic",
-        ref_text_light="I think... yeah, I think that should work. Probably. Hopefully.",
-        ref_text_medium="I... okay, um, so here's the thing. I don't know exactly how to say this, but... there might be a small problem.",
-        ref_text_full="I... I can't... the thing is... oh god, how do I even... okay, okay, um... it's bad. It's really, really bad and I don't... I don't know what to do.",
-        tags=["nervous", "anxious"],
-    ),
 }
 
-# Ordered list for consistent batch generation
+# Standard emotion set — matches the emotion matrix format
 EMOTION_ORDER = [
-    "neutral", "happy", "excited", "sad", "angry",
-    "fearful", "tender", "whispering", "shouting",
-    "laughing", "sarcastic", "nervous",
+    "neutral", "happy", "angry", "afraid", "sad",
+    "awe", "tender", "sarcastic", "manic", "exhausted",
+]
+
+# Extended emotions (available but not in standard matrix)
+EXTENDED_EMOTIONS = [
+    "whispering", "shouting", "laughing",
 ]
 
 

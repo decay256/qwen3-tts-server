@@ -1138,20 +1138,41 @@ class LocalServer:
     async def _handle_cast_voice(self, request: TunnelMessage) -> TunnelMessage:
         """POST /api/v1/voices/cast — run full emotion casting for a character.
 
-        Generates all emotion variants via VoiceDesign and creates clone prompts.
+        Supports two modes:
 
-        Request body::
+        **Mode 1: Preset-based** (uses built-in emotion presets)::
 
             {
-                "character": "maya",
-                "description": "Young woman, warm alto voice, slight vulnerability",
-                "emotions": ["neutral", "happy", "angry"],  // optional, defaults to all
-                "text_overrides": {"happy": "Custom happy text..."},  // optional
+                "character": "narrator",
+                "description": "Deep male voice, warm baritone",
+                "emotions": ["neutral", "happy", "angry"],
+                "intensities": ["medium"],
                 "language": "English",
                 "format": "wav"
             }
 
-        Returns results for each emotion with audio + prompt status.
+        **Mode 2: Matrix-based** (client provides full entries)::
+
+            {
+                "character": "narrator",
+                "description": "Deep male voice, warm baritone",
+                "entries": {
+                    "neutral_medium": {
+                        "direction": "Steady, grounded, baseline voice",
+                        "text": "They had been on Titan for eleven months..."
+                    },
+                    "angry_full": {
+                        "direction": "Thunderous, barely contained outrage",
+                        "text": "This was not an accident..."
+                    }
+                },
+                "language": "English",
+                "format": "wav"
+            }
+
+        In matrix mode, each entry key becomes the prompt name ({character}_{key}),
+        "direction" is combined with "description" as the instruct, and "text" is
+        the reference text. Tags are derived from the key.
         """
         if not self.engine.is_loaded:
             return TunnelMessage(
@@ -1159,7 +1180,6 @@ class LocalServer:
                 status_code=503, body=json.dumps({"error": "TTS engine not loaded"}),
             )
 
-        # Check base model for prompt creation
         err = self._require_base_model(request)
         if err:
             return err
@@ -1167,10 +1187,9 @@ class LocalServer:
         body = json.loads(request.body) if request.body else {}
         character = body.get("character")
         description = body.get("description")
-        emotions = body.get("emotions")  # None = all
-        text_overrides = body.get("text_overrides", {})
         language = body.get("language", "English")
         fmt = body.get("format", "wav")
+        entries = body.get("entries")  # Matrix mode
 
         if not character or not description:
             return TunnelMessage(
@@ -1178,14 +1197,37 @@ class LocalServer:
                 status_code=400, body=json.dumps({"error": "Missing 'character' and 'description'"}),
             )
 
-        from server.emotion_presets import build_casting_batch
-
-        items = build_casting_batch(
-            character_name=character,
-            base_description=description,
-            emotions=emotions,
-            text_overrides=text_overrides,
-        )
+        if entries:
+            # Matrix mode: client provides full entries dict
+            items = []
+            for key, entry in entries.items():
+                direction = entry.get("direction", "")
+                text = entry.get("text", "")
+                if not text:
+                    continue
+                instruct = f"{description}, {direction}" if direction else description
+                # Derive tags from key (e.g. "angry_full" → ["angry", "full"])
+                tags = key.split("_")
+                items.append({
+                    "name": f"{character}_{key}",
+                    "text": text,
+                    "instruct": instruct,
+                    "language": language,
+                    "tags": tags,
+                })
+        else:
+            # Preset mode: use built-in emotion presets
+            from server.emotion_presets import build_casting_batch
+            emotions = body.get("emotions")
+            intensities = body.get("intensities")
+            text_overrides = body.get("text_overrides", {})
+            items = build_casting_batch(
+                character_name=character,
+                base_description=description,
+                emotions=emotions,
+                intensities=intensities,
+                text_overrides=text_overrides,
+            )
 
         # Build a batch design request with prompt creation
         batch_body = json.dumps({
