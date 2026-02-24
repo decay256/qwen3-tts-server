@@ -543,6 +543,29 @@ class RemoteRelay:
         body = await request.text()
         return await self._forward_to_local("POST", "/api/v1/tts/clone-prompt", body=body)
 
+    async def handle_batch_design(self, request: web.Request) -> web.Response:
+        """POST /api/v1/voices/design/batch — batch generate reference clips."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        # Batch operations can be slow — use extended timeout
+        return await self._forward_to_local("POST", "/api/v1/voices/design/batch", body=body)
+
+    async def handle_batch_clone_prompt(self, request: web.Request) -> web.Response:
+        """POST /api/v1/voices/clone-prompt/batch — batch create clone prompts."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        return await self._forward_to_local("POST", "/api/v1/voices/clone-prompt/batch", body=body)
+
     def create_app(self) -> web.Application:
         """Create the aiohttp application with all routes.
 
@@ -564,8 +587,10 @@ class RemoteRelay:
         app.router.add_post("/api/v1/tts/voices/import", self.handle_import_package)
         app.router.add_post("/api/v1/tts/voices/sync", self.handle_sync_packages)
 
-        # Clone prompt routes
+        # Clone prompt routes  
         app.router.add_post("/api/v1/voices/design", self.handle_voice_design)
+        app.router.add_post("/api/v1/voices/design/batch", self.handle_batch_design)
+        app.router.add_post("/api/v1/voices/clone-prompt/batch", self.handle_batch_clone_prompt)
         app.router.add_post("/api/v1/voices/clone-prompt", self.handle_create_clone_prompt)
         app.router.add_get("/api/v1/voices/prompts", self.handle_list_prompts)
         app.router.add_delete("/api/v1/voices/prompts/{name}", self.handle_delete_prompt)

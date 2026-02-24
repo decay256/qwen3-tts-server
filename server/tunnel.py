@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 HEARTBEAT_INTERVAL = 30  # seconds
 RECONNECT_BASE_DELAY = 1  # seconds
 RECONNECT_MAX_DELAY = 60  # seconds
-MESSAGE_TIMEOUT = 120  # 2 minutes max for TTS processing
+MESSAGE_TIMEOUT = 600  # 10 minutes — batch operations can take several minutes
 HEALTH_PING_INTERVAL = 20  # seconds — relay pings client
 HEALTH_PING_TIMEOUT = 20  # seconds — kill connection if no pong
 

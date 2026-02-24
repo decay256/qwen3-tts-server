@@ -223,6 +223,11 @@ class LocalServer:
                 return await self._handle_delete_prompt(request)
             elif path == "/api/v1/tts/clone-prompt" and method == "POST":
                 return await self._handle_synthesize_with_prompt(request)
+            # Batch endpoints
+            elif path == "/api/v1/voices/design/batch" and method == "POST":
+                return await self._handle_batch_design(request)
+            elif path == "/api/v1/voices/clone-prompt/batch" and method == "POST":
+                return await self._handle_batch_clone_prompt(request)
             else:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
@@ -899,6 +904,204 @@ class LocalServer:
         return TunnelMessage(
             type=MessageType.RESPONSE, request_id=request.request_id,
             body=json.dumps({"audio": audio_b64, "format": fmt, "sample_rate": sr, "duration_s": round(len(wav) / sr, 2)}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    # ── Batch Endpoints ────────────────────────────────────────────
+
+    async def _handle_batch_design(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/voices/design/batch — generate multiple reference clips.
+
+        Request body::
+
+            {
+                "items": [
+                    {"name": "maya_neutral", "text": "...", "instruct": "...", "language": "English"},
+                    {"name": "maya_happy", "text": "...", "instruct": "...", "language": "English"}
+                ],
+                "format": "wav",
+                "create_prompts": true,   // also create clone prompts from each clip
+                "prompt_tags_prefix": ["maya"]  // tags added to all prompts
+            }
+        """
+        if not self.engine.is_loaded:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=503, body=json.dumps({"error": "TTS engine not loaded"}),
+            )
+
+        body = json.loads(request.body) if request.body else {}
+        items = body.get("items", [])
+        fmt = body.get("format", "wav")
+        create_prompts = body.get("create_prompts", False)
+        tags_prefix = body.get("prompt_tags_prefix", [])
+
+        if not items:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'items' array"}),
+            )
+
+        # Check if we need base model for prompt creation
+        if create_prompts:
+            err = self._require_base_model(request)
+            if err:
+                return err
+
+        import functools
+        from server.tts_engine import wav_to_format
+
+        loop = asyncio.get_event_loop()
+        results = []
+
+        for i, item in enumerate(items):
+            name = item.get("name", f"batch_{i}")
+            text = item.get("text", "")
+            instruct = item.get("instruct", "")
+            language = item.get("language", "English")
+            item_tags = item.get("tags", [])
+
+            if not text or not instruct:
+                results.append({"name": name, "status": "error", "error": "Missing text or instruct"})
+                continue
+
+            try:
+                # Generate audio
+                func = functools.partial(
+                    self.engine.generate_voice_design,
+                    text=text, description=instruct, language=language,
+                )
+                wav, sr = await loop.run_in_executor(None, func)
+                audio_bytes = wav_to_format(wav, sr, fmt)
+                audio_b64 = base64.b64encode(audio_bytes).decode("ascii")
+                duration_s = round(len(wav) / sr, 2)
+
+                result = {
+                    "name": name,
+                    "status": "ok",
+                    "audio": audio_b64,
+                    "format": fmt,
+                    "duration_s": duration_s,
+                }
+
+                # Optionally create clone prompt from this clip
+                if create_prompts:
+                    try:
+                        prompt_func = functools.partial(
+                            self.engine.create_clone_prompt,
+                            ref_audio_b64=base64.b64encode(wav_to_format(wav, sr, "wav")).decode("ascii"),
+                            ref_text=text,
+                        )
+                        prompt_item = await loop.run_in_executor(None, prompt_func)
+
+                        all_tags = tags_prefix + item_tags
+                        meta = self.prompt_store.save_prompt(
+                            name=name,
+                            prompt_item=prompt_item,
+                            tags=all_tags,
+                            ref_text=text,
+                            ref_audio_duration_s=duration_s,
+                        )
+                        result["prompt_created"] = True
+                        result["prompt_tags"] = all_tags
+                    except Exception as e:
+                        logger.exception("Failed to create prompt for %s", name)
+                        result["prompt_created"] = False
+                        result["prompt_error"] = str(e)
+
+                results.append(result)
+                logger.info("Batch design %d/%d: %s (%.1fs)", i + 1, len(items), name, duration_s)
+
+            except Exception as e:
+                logger.exception("Batch design failed for %s", name)
+                results.append({"name": name, "status": "error", "error": str(e)})
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({
+                "results": results,
+                "total": len(items),
+                "succeeded": sum(1 for r in results if r["status"] == "ok"),
+            }),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_batch_clone_prompt(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/voices/clone-prompt/batch — create prompts from multiple ref files.
+
+        Request body::
+
+            {
+                "items": [
+                    {"name": "maya_neutral", "ref_audio_base64": "...", "ref_text": "...", "tags": [...]},
+                    ...
+                ]
+            }
+        """
+        err = self._require_base_model(request)
+        if err:
+            return err
+
+        body = json.loads(request.body) if request.body else {}
+        items = body.get("items", [])
+
+        if not items:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'items' array"}),
+            )
+
+        import functools
+        loop = asyncio.get_event_loop()
+        results = []
+
+        for i, item in enumerate(items):
+            name = item.get("name", f"prompt_{i}")
+            ref_audio_b64 = item.get("ref_audio_base64", "")
+            ref_text = item.get("ref_text", "")
+            tags = item.get("tags", [])
+
+            if not ref_audio_b64:
+                results.append({"name": name, "status": "error", "error": "Missing ref_audio_base64"})
+                continue
+
+            try:
+                # Calculate duration
+                import io, soundfile as sf
+                audio_bytes = base64.b64decode(ref_audio_b64)
+                audio_data, audio_sr = sf.read(io.BytesIO(audio_bytes))
+                duration_s = round(len(audio_data) / audio_sr, 2)
+
+                # Create prompt
+                func = functools.partial(
+                    self.engine.create_clone_prompt,
+                    ref_audio_b64=ref_audio_b64,
+                    ref_text=ref_text,
+                    x_vector_only_mode=not bool(ref_text),
+                )
+                prompt_item = await loop.run_in_executor(None, func)
+
+                meta = self.prompt_store.save_prompt(
+                    name=name,
+                    prompt_item=prompt_item,
+                    tags=tags,
+                    ref_text=ref_text,
+                    ref_audio_duration_s=duration_s,
+                )
+                results.append({"name": name, "status": "created", "duration_s": duration_s, "tags": tags})
+                logger.info("Batch prompt %d/%d: %s", i + 1, len(items), name)
+
+            except Exception as e:
+                logger.exception("Batch prompt failed for %s", name)
+                results.append({"name": name, "status": "error", "error": str(e)})
+
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({
+                "results": results,
+                "total": len(items),
+                "succeeded": sum(1 for r in results if r["status"] in ("created", "ok")),
+            }),
             headers={"Content-Type": "application/json"},
         )
 
