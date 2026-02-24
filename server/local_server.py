@@ -228,6 +228,11 @@ class LocalServer:
                 return await self._handle_batch_design(request)
             elif path == "/api/v1/voices/clone-prompt/batch" and method == "POST":
                 return await self._handle_batch_clone_prompt(request)
+            # Casting
+            elif path == "/api/v1/voices/cast" and method == "POST":
+                return await self._handle_cast_voice(request)
+            elif path == "/api/v1/voices/emotions" and method == "GET":
+                return await self._handle_list_emotions(request)
             else:
                 return TunnelMessage(
                     type=MessageType.RESPONSE,
@@ -1104,6 +1109,98 @@ class LocalServer:
             }),
             headers={"Content-Type": "application/json"},
         )
+
+    # ── Voice Casting ─────────────────────────────────────────────
+
+    async def _handle_list_emotions(self, request: TunnelMessage) -> TunnelMessage:
+        """GET /api/v1/voices/emotions — list available emotion presets."""
+        from server.emotion_presets import EMOTION_PRESETS, EMOTION_ORDER
+        
+        emotions = []
+        for name in EMOTION_ORDER:
+            preset = EMOTION_PRESETS[name]
+            emotions.append({
+                "name": preset.name,
+                "instruct": preset.instruct,
+                "ref_text": preset.ref_text,
+                "tags": preset.tags,
+            })
+        
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"emotions": emotions, "count": len(emotions)}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_cast_voice(self, request: TunnelMessage) -> TunnelMessage:
+        """POST /api/v1/voices/cast — run full emotion casting for a character.
+
+        Generates all emotion variants via VoiceDesign and creates clone prompts.
+
+        Request body::
+
+            {
+                "character": "maya",
+                "description": "Young woman, warm alto voice, slight vulnerability",
+                "emotions": ["neutral", "happy", "angry"],  // optional, defaults to all
+                "text_overrides": {"happy": "Custom happy text..."},  // optional
+                "language": "English",
+                "format": "wav"
+            }
+
+        Returns results for each emotion with audio + prompt status.
+        """
+        if not self.engine.is_loaded:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=503, body=json.dumps({"error": "TTS engine not loaded"}),
+            )
+
+        # Check base model for prompt creation
+        err = self._require_base_model(request)
+        if err:
+            return err
+
+        body = json.loads(request.body) if request.body else {}
+        character = body.get("character")
+        description = body.get("description")
+        emotions = body.get("emotions")  # None = all
+        text_overrides = body.get("text_overrides", {})
+        language = body.get("language", "English")
+        fmt = body.get("format", "wav")
+
+        if not character or not description:
+            return TunnelMessage(
+                type=MessageType.RESPONSE, request_id=request.request_id,
+                status_code=400, body=json.dumps({"error": "Missing 'character' and 'description'"}),
+            )
+
+        from server.emotion_presets import build_casting_batch
+
+        items = build_casting_batch(
+            character_name=character,
+            base_description=description,
+            emotions=emotions,
+            text_overrides=text_overrides,
+        )
+
+        # Build a batch design request with prompt creation
+        batch_body = json.dumps({
+            "items": items,
+            "format": fmt,
+            "create_prompts": True,
+            "prompt_tags_prefix": [character],
+        })
+
+        # Reuse batch handler
+        batch_request = TunnelMessage(
+            type=MessageType.REQUEST,
+            request_id=request.request_id,
+            path="/api/v1/voices/design/batch",
+            method="POST",
+            body=batch_body,
+        )
+        return await self._handle_batch_design(batch_request)
 
     async def _auto_sync_voice(self, voice_id: str) -> None:
         """Auto-sync a single voice package to the relay."""

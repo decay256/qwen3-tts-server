@@ -543,6 +543,27 @@ class RemoteRelay:
         body = await request.text()
         return await self._forward_to_local("POST", "/api/v1/tts/clone-prompt", body=body)
 
+    async def handle_list_emotions(self, request: web.Request) -> web.Response:
+        """GET /api/v1/voices/emotions — list emotion presets."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        return await self._forward_to_local("GET", "/api/v1/voices/emotions")
+
+    async def handle_cast_voice(self, request: web.Request) -> web.Response:
+        """POST /api/v1/voices/cast — full emotion casting for a character."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        body = await request.text()
+        return await self._forward_to_local("POST", "/api/v1/voices/cast", body=body)
+
     async def handle_batch_design(self, request: web.Request) -> web.Response:
         """POST /api/v1/voices/design/batch — batch generate reference clips."""
         auth_error = await self._require_auth(request)
@@ -587,7 +608,9 @@ class RemoteRelay:
         app.router.add_post("/api/v1/tts/voices/import", self.handle_import_package)
         app.router.add_post("/api/v1/tts/voices/sync", self.handle_sync_packages)
 
-        # Clone prompt routes  
+        # Clone prompt routes
+        app.router.add_get("/api/v1/voices/emotions", self.handle_list_emotions)
+        app.router.add_post("/api/v1/voices/cast", self.handle_cast_voice)
         app.router.add_post("/api/v1/voices/design", self.handle_voice_design)
         app.router.add_post("/api/v1/voices/design/batch", self.handle_batch_design)
         app.router.add_post("/api/v1/voices/clone-prompt/batch", self.handle_batch_clone_prompt)
