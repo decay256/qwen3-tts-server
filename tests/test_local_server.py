@@ -51,10 +51,27 @@ def server(tmp_path, mock_engine):
         "local": {"voices_dir": str(tmp_path / "voices")},
     }
 
+    mock_tunnel = MagicMock()
+    mock_tunnel.get_status.return_value = {
+        "connected": False,
+        "state": "disconnected",
+        "connection_count": 0,
+        "health": {
+            "total_attempts": 0,
+            "successful_connections": 0,
+            "consecutive_failures": 0,
+            "success_rate": 0.0,
+            "failure_types": {},
+        },
+        "circuit_breaker": {
+            "active": False,
+            "remaining_seconds": 0,
+        },
+    }
+
     with patch("server.local_server.TTSEngine", return_value=mock_engine):
-        with patch("server.local_server.TunnelClient"):
+        with patch("server.local_server.EnhancedTunnelClient", return_value=mock_tunnel):
             srv = LocalServer(config)
-            # Replace engine/voice_manager with our controlled versions
             srv.engine = mock_engine
             srv.voice_manager = VoiceManager(str(tmp_path / "voices"), engine=mock_engine)
             srv.voice_manager.initialize_default_cast()
