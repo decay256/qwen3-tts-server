@@ -1116,22 +1116,36 @@ class LocalServer:
     # ── Voice Casting ─────────────────────────────────────────────
 
     async def _handle_list_emotions(self, request: TunnelMessage) -> TunnelMessage:
-        """GET /api/v1/voices/emotions — list available emotion presets."""
-        from server.emotion_presets import EMOTION_PRESETS, EMOTION_ORDER
-        
+        """GET /api/v1/voices/emotions — list available presets (emotions + modes)."""
+        from server.emotion_presets import (
+            EMOTION_PRESETS, EMOTION_ORDER, EMOTION_INTENSITIES,
+            MODE_PRESETS, MODE_ORDER,
+        )
+
         emotions = []
         for name in EMOTION_ORDER:
-            preset = EMOTION_PRESETS[name]
+            p = EMOTION_PRESETS[name]
             emotions.append({
-                "name": preset.name,
-                "instruct": preset.instruct,
-                "ref_text": preset.ref_text,
-                "tags": preset.tags,
+                "name": p.name,
+                "intensities": EMOTION_INTENSITIES,
+                "tags": p.tags,
             })
-        
+
+        modes = []
+        for name in MODE_ORDER:
+            p = MODE_PRESETS[name]
+            modes.append({
+                "name": p.name,
+                "tags": p.tags,
+            })
+
         return TunnelMessage(
             type=MessageType.RESPONSE, request_id=request.request_id,
-            body=json.dumps({"emotions": emotions, "count": len(emotions)}),
+            body=json.dumps({
+                "emotions": emotions,
+                "modes": modes,
+                "total_entries": len(emotions) * len(EMOTION_INTENSITIES) + len(modes),
+            }),
             headers={"Content-Type": "application/json"},
         )
 
@@ -1220,12 +1234,14 @@ class LocalServer:
             from server.emotion_presets import build_casting_batch
             emotions = body.get("emotions")
             intensities = body.get("intensities")
+            modes = body.get("modes")
             text_overrides = body.get("text_overrides", {})
             items = build_casting_batch(
                 character_name=character,
                 base_description=description,
                 emotions=emotions,
                 intensities=intensities,
+                modes=modes,
                 text_overrides=text_overrides,
             )
 
