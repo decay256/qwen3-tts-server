@@ -134,8 +134,8 @@ EMOTION_ORDER = list(EMOTION_PRESETS.keys())
 MODE_PRESETS: dict[str, ModePreset] = {
     "laughing": ModePreset(
         name="laughing",
-        instruct="laughing joyfully while speaking, genuine warm laughter between words, light chuckling and giggling",
-        ref_text="And then he just... hahaha... he walked right into the glass door! In front of everyone! Hahaha!",
+        instruct="cracking up, sharp sudden bursts of laughter, bright open-mouthed laugh",
+        ref_text="Hahahaha! Hehehe! Ha ha ha! Hihi! Hahaha!",
         tags=["laughing", "physical"],
     ),
     "crying": ModePreset(
