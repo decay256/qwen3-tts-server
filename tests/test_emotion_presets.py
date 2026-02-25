@@ -62,7 +62,7 @@ def test_all_modes_in_order():
 
 
 def test_mode_count():
-    assert len(MODE_PRESETS) == 15
+    assert len(MODE_PRESETS) == 12
 
 
 def test_mode_preset_structure():

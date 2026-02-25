@@ -132,12 +132,6 @@ EMOTION_ORDER = list(EMOTION_PRESETS.keys())
 # ── Modes (15 × 1 = 15 entries) ────────────────────────────────────
 
 MODE_PRESETS: dict[str, ModePreset] = {
-    "laughing": ModePreset(
-        name="laughing",
-        instruct="uncontrollable laughter, can barely breathe, gasping between fits, voice cracking from laughing so hard",
-        ref_text="Hahahaha! Oh god I can't... hahaha... stop, STOP, I'm going to die... hahahaha! My stomach, oh god my stomach hurts! Hahaha I literally cannot breathe!",
-        tags=["laughing", "physical"],
-    ),
     "crying": ModePreset(
         name="crying",
         instruct="sobbing uncontrollably, voice shattering, gasping for air between sobs, wet ragged breathing, tears choking words",
@@ -170,15 +164,9 @@ MODE_PRESETS: dict[str, ModePreset] = {
     ),
     "whispering": ModePreset(
         name="whispering",
-        instruct="barely breathing the words, extreme whisper, terrified of being heard, no voicing just shaped air",
+        instruct="pure unvoiced whisper, zero vocal cord vibration, only shaped breath and air, no bass no resonance no phonation at all, like a secret you'd die to protect",
         ref_text="Don't... breathe... it's right outside the door... if it hears us... just close your eyes and don't move a muscle...",
         tags=["whispering", "quiet"],
-    ),
-    "monotone": ModePreset(
-        name="monotone",
-        instruct="completely flat affect, dissociated, shell-shocked, robotic delivery, no emotional inflection whatsoever",
-        ref_text="The hull breached at fourteen hundred hours. Seventeen people died. Pressure equalized after nine minutes. I was in section four. I watched it happen. Then I filed my report.",
-        tags=["monotone", "dissociated", "delivery"],
     ),
     "singsong": ModePreset(
         name="singsong",
@@ -203,12 +191,6 @@ MODE_PRESETS: dict[str, ModePreset] = {
         instruct="crisp radio comms voice, clipped professional delivery, military brevity, terse and precise",
         ref_text="Bravo six actual, this is overwatch. Contact bearing zero-niner-five, range two hundred meters. Two tangos moving east. Request clearance to engage. Over.",
         tags=["radio", "comms", "military", "context"],
-    ),
-    "internal": ModePreset(
-        name="internal",
-        instruct="close-mic internal monologue, intimate and thoughtful, as if the thoughts are forming in real time, quiet self-reflection",
-        ref_text="Maybe I was wrong about all of it. Maybe the signal was never meant for us at all. And if that's true... then what have we been doing out here this whole time?",
-        tags=["internal", "monologue", "intimate", "context"],
     ),
     "narration": ModePreset(
         name="narration",
