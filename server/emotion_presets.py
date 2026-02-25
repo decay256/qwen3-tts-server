@@ -132,6 +132,12 @@ EMOTION_ORDER = list(EMOTION_PRESETS.keys())
 # ── Modes (15 × 1 = 15 entries) ────────────────────────────────────
 
 MODE_PRESETS: dict[str, ModePreset] = {
+    "laughing": ModePreset(
+        name="laughing",
+        instruct="laughing joyfully while speaking, genuine warm laughter between words, light chuckling and giggling",
+        ref_text="And then he just... hahaha... he walked right into the glass door! In front of everyone! Hahaha!",
+        tags=["laughing", "physical"],
+    ),
     "crying": ModePreset(
         name="crying",
         instruct="sobbing uncontrollably, voice shattering, gasping for air between sobs, wet ragged breathing, tears choking words",
@@ -164,8 +170,8 @@ MODE_PRESETS: dict[str, ModePreset] = {
     ),
     "whispering": ModePreset(
         name="whispering",
-        instruct="pure unvoiced whisper, zero vocal cord vibration, only shaped breath and air, no bass no resonance no phonation at all, like a secret you'd die to protect",
-        ref_text="Don't... breathe... it's right outside the door... if it hears us... just close your eyes and don't move a muscle...",
+        instruct="ASMR whispering directly into microphone, intimate breathy voice, extremely soft and delicate, no projection",
+        ref_text="Don't move... stay perfectly still... it's right outside... just breathe slowly... slowly...",
         tags=["whispering", "quiet"],
     ),
     "singsong": ModePreset(
