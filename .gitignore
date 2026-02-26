@@ -18,3 +18,5 @@ voices/*
 config.yaml
 config-relay.yaml
 tts_env/
+web/.env
+*.db

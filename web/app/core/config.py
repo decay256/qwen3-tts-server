@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     llm_model: str = "gpt-4o-mini"  # or "claude-sonnet-4-20250514"
 
-    model_config = {"env_file": ".env", "env_file_encoding": "utf-8", "extra": "ignore"}
+    model_config = {"env_file": [".env", "web/.env"], "env_file_encoding": "utf-8", "extra": "ignore"}
 
 
 settings = Settings()

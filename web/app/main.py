@@ -5,9 +5,11 @@ FastAPI application with auth, character management, TTS proxy, and LLM refineme
 
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from web.app.core.config import settings
 from web.app.core.database import init_db
@@ -54,3 +56,19 @@ app.include_router(tts.router)
 async def health():
     """Health check endpoint."""
     return {"status": "ok", "service": settings.app_name}
+
+
+# Serve frontend static files (built React SPA)
+_frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
+if _frontend_dist.exists():
+    # SPA fallback: serve index.html for all non-API routes
+    from starlette.responses import FileResponse
+
+    @app.get("/{path:path}")
+    async def spa_fallback(path: str):
+        file = _frontend_dist / path
+        if file.is_file():
+            return FileResponse(file)
+        return FileResponse(_frontend_dist / "index.html")
+
+    logger.info("Serving frontend from %s", _frontend_dist)
