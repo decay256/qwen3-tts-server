@@ -17,3 +17,4 @@ voices/*
 !voices/.gitkeep
 config.yaml
 config-relay.yaml
+tts_env/

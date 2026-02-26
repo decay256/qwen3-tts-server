@@ -1,0 +1,51 @@
+version: "3.8"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: voicestudio
+      POSTGRES_PASSWORD: voicestudio
+      POSTGRES_DB: voicestudio
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U voicestudio"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  web:
+    build:
+      context: .
+      dockerfile: web/Dockerfile
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://voicestudio:voicestudio@db:5432/voicestudio
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Frontend (production build served by Caddy)
+  # frontend:
+  #   build:
+  #     context: frontend
+  #   # Static files served by Caddy
+
+  # caddy:
+  #   image: caddy:2-alpine
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./Caddyfile:/etc/caddy/Caddyfile
+  #     - caddy_data:/data
+
+volumes:
+  pgdata:
+  # caddy_data:
