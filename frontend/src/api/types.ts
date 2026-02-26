@@ -30,10 +30,19 @@ export interface TTSStatus {
 
 export interface EmotionPreset {
   name: string;
+  type: 'emotion';
   instruct_medium: string;
   instruct_intense: string;
   ref_text_medium: string;
   ref_text_intense: string;
+  tags: string[];
+}
+
+export interface ModePreset {
+  name: string;
+  type: 'mode';
+  instruct: string;
+  ref_text: string;
   tags: string[];
 }
 
