@@ -36,9 +36,9 @@ RUN pip3 install --no-cache-dir numpy
 COPY requirements-server.txt .
 RUN pip3 install --no-cache-dir -r requirements-server.txt
 
-# Additional deps for standalone server
+# Additional deps for standalone server + RunPod handler
 RUN pip3 install --no-cache-dir \
-    fastapi uvicorn[standard] pyyaml psutil
+    fastapi uvicorn[standard] pyyaml psutil runpod
 
 # Copy server code
 COPY server/ server/
@@ -57,4 +57,6 @@ HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
 
 EXPOSE 8000
 
-CMD ["python3", "-m", "server.standalone"]
+# Default: RunPod serverless handler (queue-based)
+# Override with: CMD ["python3", "-m", "server.standalone"] for direct HTTP
+CMD ["python3", "-m", "server.runpod_handler"]
