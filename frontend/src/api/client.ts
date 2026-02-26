@@ -1,6 +1,6 @@
 /** API client — handles auth headers and token refresh. */
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:8080';
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
 interface Tokens {
   access_token: string;
