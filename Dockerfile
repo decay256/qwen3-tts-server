@@ -30,6 +30,9 @@ WORKDIR /app
 RUN pip3 install --no-cache-dir \
     torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 
+# Install numpy first (needed by qwen-tts during metadata generation)
+RUN pip3 install --no-cache-dir numpy
+
 COPY requirements-server.txt .
 RUN pip3 install --no-cache-dir -r requirements-server.txt
 
