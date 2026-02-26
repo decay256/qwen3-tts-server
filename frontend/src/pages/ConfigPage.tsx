@@ -50,8 +50,8 @@ export function ConfigPage() {
   if (!config) return <div className="loading">Loading...</div>;
 
   const suggestedModels = provider === 'anthropic'
-    ? ['claude-sonnet-4-20250514', 'claude-haiku-4-20250414']
-    : ['gpt-4o-mini', 'gpt-4o', 'gpt-4.1-mini', 'gpt-4.1'];
+    ? ['claude-sonnet-4-6', 'claude-opus-4-6', 'claude-haiku-4-5']
+    : ['gpt-4o-mini', 'gpt-4o', 'gpt-5-mini', 'gpt-5'];
 
   return (
     <div className="config-page">
