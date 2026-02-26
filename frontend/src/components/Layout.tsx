@@ -20,6 +20,8 @@ export function Layout({ onLogout }: Props) {
         <Link to="/" className="logo">🎙 Voice Studio</Link>
         <nav>
           <Link to="/">Dashboard</Link>
+          <Link to="/config">Config</Link>
+          <Link to="/account">Account</Link>
           <button onClick={handleLogout} className="btn-link">Logout</button>
         </nav>
       </header>

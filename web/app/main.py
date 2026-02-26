@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from web.app.core.config import settings
 from web.app.core.database import init_db
-from web.app.routes import auth, characters, tts
+from web.app.routes import account, auth, characters, config, tts
 from web.app.services.tts_proxy import close_client
 
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO)
@@ -48,7 +48,9 @@ app.add_middleware(
 
 # Routes
 app.include_router(auth.router)
+app.include_router(account.router)
 app.include_router(characters.router)
+app.include_router(config.router)
 app.include_router(tts.router)
 
 

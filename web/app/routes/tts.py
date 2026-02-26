@@ -141,10 +141,7 @@ class RefineRequest(BaseModel):
 
 @router.post("/voices/refine")
 async def refine_prompt(body: RefineRequest, user: User = Depends(get_current_user)):
-    """Use LLM to refine a voice instruct based on feedback.
-
-    Returns: {"new_instruct": "...", "new_base_description": "..." or null, "explanation": "..."}
-    """
+    """Use LLM to refine a voice instruct based on feedback."""
     from web.app.services.llm_refine import refine_prompt as do_refine
 
     try:
@@ -159,3 +156,120 @@ async def refine_prompt(body: RefineRequest, user: User = Depends(get_current_us
         raise HTTPException(status_code=502, detail=f"LLM response parsing failed: {e}")
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"LLM call failed: {e}")
+
+
+# ── Batch Design ────────────────────────────────────────────────────
+
+
+class BatchDesignItem(BaseModel):
+    name: str
+    text: str
+    instruct: str
+    language: str = "English"
+    tags: list[str] | None = None
+    character: str | None = None
+    emotion: str | None = None
+    intensity: str | None = None
+    description: str | None = None
+    base_description: str | None = None
+
+
+class BatchDesignRequest(BaseModel):
+    items: list[BatchDesignItem]
+    format: str = "wav"
+    create_prompts: bool = False
+    tags_prefix: list[str] | None = None
+
+
+@router.post("/voices/design/batch")
+async def batch_design(body: BatchDesignRequest, user: User = Depends(get_current_user)):
+    """Batch VoiceDesign synthesis with optional clone prompt creation."""
+    return await tts_proxy.tts_post(
+        "/api/v1/voices/design/batch",
+        body.model_dump(exclude_none=True),
+    )
+
+
+# ── Clone Prompt ────────────────────────────────────────────────────
+
+
+class CreateClonePromptRequest(BaseModel):
+    audio: str  # base64
+    name: str
+    ref_text: str | None = None
+    tags: list[str] | None = None
+    format: str = "wav"
+    character: str | None = None
+    emotion: str | None = None
+    intensity: str | None = None
+    description: str | None = None
+    instruct: str | None = None
+    base_description: str | None = None
+
+
+@router.post("/voices/clone-prompt")
+async def create_clone_prompt(body: CreateClonePromptRequest, user: User = Depends(get_current_user)):
+    """Create a clone prompt from reference audio."""
+    return await tts_proxy.tts_post(
+        "/api/v1/voices/clone-prompt",
+        body.model_dump(exclude_none=True),
+    )
+
+
+class BatchClonePromptItem(BaseModel):
+    audio: str  # base64
+    name: str
+    ref_text: str | None = None
+    tags: list[str] | None = None
+    format: str = "wav"
+
+
+class BatchClonePromptRequest(BaseModel):
+    items: list[BatchClonePromptItem]
+
+
+@router.post("/voices/clone-prompt/batch")
+async def batch_clone_prompt(body: BatchClonePromptRequest, user: User = Depends(get_current_user)):
+    """Batch create clone prompts from reference audio."""
+    return await tts_proxy.tts_post(
+        "/api/v1/voices/clone-prompt/batch",
+        body.model_dump(exclude_none=True),
+    )
+
+
+# ── Audio Normalize ─────────────────────────────────────────────────
+
+
+class NormalizeRequest(BaseModel):
+    audio: str  # base64
+    ref_audio: str  # base64
+    strength: float = 0.5
+    format: str = "wav"
+
+
+@router.post("/audio/normalize")
+async def normalize_audio(body: NormalizeRequest, user: User = Depends(get_current_user)):
+    """Normalize audio formants toward a reference."""
+    return await tts_proxy.tts_post("/api/v1/audio/normalize", body.model_dump())
+
+
+# ── Voice Packages ──────────────────────────────────────────────────
+
+
+@router.get("/voices/{voice_id}/package")
+async def export_package(voice_id: str, user: User = Depends(get_current_user)):
+    """Export a voice as a self-contained package."""
+    return await tts_proxy.tts_get(f"/api/v1/tts/voices/{voice_id}/package")
+
+
+@router.post("/voices/import")
+async def import_package(user: User = Depends(get_current_user)):
+    """Import a voice package."""
+    # This would need multipart handling — pass through for now
+    raise HTTPException(status_code=501, detail="Voice package import not yet available via web UI")
+
+
+@router.post("/voices/sync")
+async def sync_packages(user: User = Depends(get_current_user)):
+    """Sync voice packages between servers."""
+    return await tts_proxy.tts_post("/api/v1/tts/voices/sync", {})

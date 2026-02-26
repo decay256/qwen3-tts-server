@@ -45,6 +45,9 @@ export function LoginPage({ onLogin, error, loading }: Props) {
         </form>
         {error && <p className="error">{error}</p>}
         <p className="auth-link">
+          <Link to="/forgot-password">Forgot password?</Link>
+        </p>
+        <p className="auth-link">
           Don't have an account? <Link to="/register">Sign Up</Link>
         </p>
       </div>

@@ -254,3 +254,25 @@ section h3 { margin-bottom: 12px; font-size: 16px; }
 .play-btn { font-size: 18px; background: var(--accent); color: white; border-radius: 50%; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center; }
 
 .loading { text-align: center; padding: 40px; color: var(--text-dim); }
+
+/* Account page */
+.account-page section, .config-page section { margin-bottom: 16px; }
+.info-row { display: flex; gap: 8px; margin-bottom: 8px; font-size: 14px; }
+.info-row span:first-child { color: var(--text-dim); min-width: 100px; }
+.text-green { color: var(--success); }
+.text-red { color: var(--danger); }
+.danger-zone { border-color: var(--danger); }
+.danger-zone h3 { color: var(--danger); }
+.warning-text { color: var(--danger); font-size: 14px; margin-bottom: 12px; }
+.btn-row { display: flex; gap: 8px; }
+
+/* Config page */
+.form-row { margin-bottom: 12px; }
+.form-row label { display: block; font-size: 13px; color: var(--text-dim); margin-bottom: 4px; }
+
+/* Flash messages */
+.flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; font-size: 14px; }
+.flash.success { background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid var(--success); }
+.flash.error { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger); }
+
+code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'JetBrains Mono', monospace; }
