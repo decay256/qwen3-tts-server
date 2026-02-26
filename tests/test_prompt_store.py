@@ -177,3 +177,151 @@ class TestPromptStore:
         prompts = store.list_prompts()
         assert len(prompts) == 1
         assert prompts[0]["tags"] == ["v2"]
+
+
+class TestVoiceLibrary:
+    """Tests for voice library search and character features."""
+
+    @pytest.fixture
+    def library_store(self, tmp_path):
+        """Create a PromptStore populated with voice library entries."""
+        mock_torch = MagicMock()
+        mock_torch.save = MagicMock()
+
+        with patch("server.prompt_store._get_torch", return_value=mock_torch):
+            from server.prompt_store import PromptStore
+            s = PromptStore(tmp_path / "voice-prompts")
+
+            # Add Kira prompts
+            for emotion in ["happy", "angry", "afraid"]:
+                for intensity in ["medium", "intense"]:
+                    item = MockPromptItem(ref_text=f"Kira {emotion} {intensity}")
+                    s.save_prompt(
+                        name=f"kira_{emotion}_{intensity}",
+                        prompt_item=item,
+                        tags=["kira", emotion, intensity],
+                        ref_text=f"Kira {emotion} {intensity}",
+                        character="kira",
+                        emotion=emotion,
+                        intensity=intensity,
+                        description=f"{emotion} ({intensity})",
+                        instruct=f"Adult woman, husky voice, {emotion}",
+                        base_description="Adult woman, husky voice",
+                    )
+            # Add Kira mode
+            item = MockPromptItem(ref_text="Kira laughing")
+            s.save_prompt(
+                name="kira_laughing",
+                prompt_item=item,
+                tags=["kira", "laughing"],
+                ref_text="Hahahaha!",
+                character="kira",
+                emotion="laughing",
+                intensity="full",
+                description="laughing (mode): cracking up",
+                base_description="Adult woman, husky voice",
+            )
+
+            # Add Marcus prompts
+            for emotion in ["happy", "sad"]:
+                item = MockPromptItem(ref_text=f"Marcus {emotion}")
+                s.save_prompt(
+                    name=f"marcus_{emotion}_medium",
+                    prompt_item=item,
+                    tags=["marcus", emotion, "medium"],
+                    ref_text=f"Marcus {emotion}",
+                    character="marcus",
+                    emotion=emotion,
+                    intensity="medium",
+                    description=f"{emotion} (medium)",
+                    base_description="Young man, light tenor",
+                )
+
+            yield s
+
+    def test_search_by_character(self, library_store):
+        results = library_store.search_prompts(character="kira")
+        assert len(results) == 7  # 3 emotions × 2 intensities + 1 mode
+
+    def test_search_by_character_case_insensitive(self, library_store):
+        results = library_store.search_prompts(character="Kira")
+        assert len(results) == 7
+
+    def test_search_by_emotion(self, library_store):
+        results = library_store.search_prompts(emotion="happy")
+        assert len(results) == 3  # kira happy medium, kira happy intense, marcus happy medium
+
+    def test_search_by_character_and_emotion(self, library_store):
+        results = library_store.search_prompts(character="kira", emotion="angry")
+        assert len(results) == 2  # medium + intense
+
+    def test_search_by_character_emotion_intensity(self, library_store):
+        results = library_store.search_prompts(character="kira", emotion="angry", intensity="intense")
+        assert len(results) == 1
+        assert results[0]["name"] == "kira_angry_intense"
+        assert results[0]["description"] == "angry (intense)"
+        assert results[0]["instruct"] == "Adult woman, husky voice, angry"
+        assert results[0]["base_description"] == "Adult woman, husky voice"
+
+    def test_search_no_results(self, library_store):
+        results = library_store.search_prompts(character="nonexistent")
+        assert len(results) == 0
+
+    def test_search_with_tags(self, library_store):
+        results = library_store.search_prompts(tags=["laughing"])
+        assert len(results) == 1
+        assert results[0]["name"] == "kira_laughing"
+
+    def test_list_characters(self, library_store):
+        chars = library_store.list_characters()
+        assert len(chars) == 2
+        kira = next(c for c in chars if c["character"] == "kira")
+        assert kira["prompt_count"] == 7
+        assert "happy" in kira["emotions"]
+        assert "angry" in kira["emotions"]
+        assert "laughing" in kira["emotions"]
+
+        marcus = next(c for c in chars if c["character"] == "marcus")
+        assert marcus["prompt_count"] == 2
+        assert "happy" in marcus["emotions"]
+        assert "sad" in marcus["emotions"]
+
+    def test_metadata_includes_voice_library_fields(self, library_store):
+        meta = library_store.get_metadata("kira_happy_medium")
+        assert meta is not None
+        assert meta.character == "kira"
+        assert meta.emotion == "happy"
+        assert meta.intensity == "medium"
+        d = meta.to_dict()
+        assert "character" in d
+        assert "emotion" in d
+        assert "description" in d
+
+    def test_metadata_omits_none_fields(self):
+        """Voice library fields should not appear in to_dict when None."""
+        from server.prompt_store import PromptMetadata
+        meta = PromptMetadata(name="basic")
+        d = meta.to_dict()
+        assert "character" not in d
+        assert "emotion" not in d
+        assert "description" not in d
+
+    def test_metadata_roundtrip(self):
+        from server.prompt_store import PromptMetadata
+        meta = PromptMetadata(
+            name="test",
+            character="kira",
+            emotion="angry",
+            intensity="intense",
+            description="angry (intense)",
+            instruct="husky voice, angry",
+            base_description="Adult woman, husky voice",
+        )
+        d = meta.to_dict()
+        meta2 = PromptMetadata.from_dict(d)
+        assert meta2.character == "kira"
+        assert meta2.emotion == "angry"
+        assert meta2.intensity == "intense"
+        assert meta2.description == "angry (intense)"
+        assert meta2.instruct == "husky voice, angry"
+        assert meta2.base_description == "Adult woman, husky voice"

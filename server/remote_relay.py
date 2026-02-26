@@ -521,6 +521,29 @@ class RemoteRelay:
             path += f"?{request.query_string}"
         return await self._forward_to_local("GET", path)
 
+    async def handle_search_prompts(self, request: web.Request) -> web.Response:
+        """GET /api/v1/voices/prompts/search — search prompts by voice library fields."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        path = "/api/v1/voices/prompts/search"
+        if request.query_string:
+            path += f"?{request.query_string}"
+        return await self._forward_to_local("GET", path)
+
+    async def handle_list_characters(self, request: web.Request) -> web.Response:
+        """GET /api/v1/voices/characters — list characters in voice library."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+        tunnel_error = await self._require_tunnel()
+        if tunnel_error:
+            return tunnel_error
+        return await self._forward_to_local("GET", "/api/v1/voices/characters")
+
     async def handle_delete_prompt(self, request: web.Request) -> web.Response:
         """DELETE /api/v1/voices/prompts/{name} — delete a clone prompt."""
         auth_error = await self._require_auth(request)
@@ -629,6 +652,8 @@ class RemoteRelay:
         app.router.add_post("/api/v1/voices/design/batch", self.handle_batch_design)
         app.router.add_post("/api/v1/voices/clone-prompt/batch", self.handle_batch_clone_prompt)
         app.router.add_post("/api/v1/voices/clone-prompt", self.handle_create_clone_prompt)
+        app.router.add_get("/api/v1/voices/prompts/search", self.handle_search_prompts)
+        app.router.add_get("/api/v1/voices/characters", self.handle_list_characters)
         app.router.add_get("/api/v1/voices/prompts", self.handle_list_prompts)
         app.router.add_delete("/api/v1/voices/prompts/{name}", self.handle_delete_prompt)
         app.router.add_post("/api/v1/tts/clone-prompt", self.handle_synthesize_with_prompt)

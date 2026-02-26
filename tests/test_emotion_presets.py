@@ -155,3 +155,28 @@ def test_no_neutral_in_emotions():
     """Neutral is the base voice — no need for a separate emotion preset."""
     assert "neutral" not in EMOTION_PRESETS
     assert "neutral" not in EMOTION_ORDER
+
+
+def test_build_casting_batch_voice_library_metadata():
+    """Casting batch items include voice library metadata."""
+    from server.emotion_presets import build_casting_batch
+    items = build_casting_batch("kira", "Adult woman, husky voice", emotions=["happy"], modes=[])
+    assert len(items) == 2  # happy medium + happy intense
+    for item in items:
+        assert item["character"] == "kira"
+        assert item["emotion"] == "happy"
+        assert item["base_description"] == "Adult woman, husky voice"
+        assert "description" in item
+    assert items[0]["intensity"] == "medium"
+    assert items[1]["intensity"] == "intense"
+
+
+def test_build_casting_batch_mode_metadata():
+    """Mode items include voice library metadata."""
+    from server.emotion_presets import build_casting_batch
+    items = build_casting_batch("kira", "Adult woman", emotions=[], modes=["laughing"])
+    assert len(items) == 1
+    assert items[0]["character"] == "kira"
+    assert items[0]["emotion"] == "laughing"
+    assert items[0]["intensity"] == "full"
+    assert "mode" in items[0]["description"]

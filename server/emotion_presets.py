@@ -254,12 +254,19 @@ def build_casting_batch(
             name = f"{character_name}_{key}"
             text = text_overrides.get(key, preset.get_ref_text(intensity))
             instruct = preset.get_instruct(base_description, intensity)
+            instruct_raw = preset.instruct_intense if intensity == "intense" else preset.instruct_medium
             items.append({
                 "name": name,
                 "text": text,
                 "instruct": instruct,
                 "language": "English",
                 "tags": [emotion_name, intensity] + preset.tags,
+                # Voice library metadata
+                "character": character_name,
+                "emotion": emotion_name,
+                "intensity": intensity,
+                "description": f"{emotion_name} ({intensity}): {instruct_raw}",
+                "base_description": base_description,
             })
 
     # Modes (single intensity)
@@ -277,6 +284,12 @@ def build_casting_batch(
             "instruct": instruct,
             "language": "English",
             "tags": [mode_name] + preset.tags,
+            # Voice library metadata
+            "character": character_name,
+            "emotion": mode_name,
+            "intensity": "full",
+            "description": f"{mode_name} (mode): {preset.instruct}",
+            "base_description": base_description,
         })
 
     return items

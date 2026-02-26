@@ -30,7 +30,12 @@ def _get_torch():
 
 @dataclass
 class PromptMetadata:
-    """Metadata for a saved clone prompt."""
+    """Metadata for a saved clone prompt.
+
+    Core fields (name, tags, ref_text) are always present.
+    Voice library fields (character, emotion, intensity, description, instruct)
+    are populated when prompts are created via the casting workflow.
+    """
     name: str
     tags: list[str] = field(default_factory=list)
     ref_text: Optional[str] = None
@@ -38,13 +43,24 @@ class PromptMetadata:
     ref_audio_duration_s: Optional[float] = None
     x_vector_only_mode: bool = False
     icl_mode: bool = True
+    # Voice library fields
+    character: Optional[str] = None
+    emotion: Optional[str] = None
+    intensity: Optional[str] = None
+    description: Optional[str] = None
+    instruct: Optional[str] = None
+    base_description: Optional[str] = None
 
     def matches_tags(self, query_tags: list[str]) -> bool:
         """Check if this prompt has ALL the requested tags (AND logic)."""
         return all(t in self.tags for t in query_tags)
 
+    def matches_character(self, character: str) -> bool:
+        """Check if this prompt belongs to a character."""
+        return self.character is not None and self.character.lower() == character.lower()
+
     def to_dict(self) -> dict:
-        return {
+        d = {
             "name": self.name,
             "tags": self.tags,
             "ref_text": self.ref_text,
@@ -53,6 +69,20 @@ class PromptMetadata:
             "x_vector_only_mode": self.x_vector_only_mode,
             "icl_mode": self.icl_mode,
         }
+        # Include voice library fields only when set
+        if self.character is not None:
+            d["character"] = self.character
+        if self.emotion is not None:
+            d["emotion"] = self.emotion
+        if self.intensity is not None:
+            d["intensity"] = self.intensity
+        if self.description is not None:
+            d["description"] = self.description
+        if self.instruct is not None:
+            d["instruct"] = self.instruct
+        if self.base_description is not None:
+            d["base_description"] = self.base_description
+        return d
 
     @classmethod
     def from_dict(cls, data: dict) -> PromptMetadata:
@@ -64,6 +94,12 @@ class PromptMetadata:
             ref_audio_duration_s=data.get("ref_audio_duration_s"),
             x_vector_only_mode=data.get("x_vector_only_mode", False),
             icl_mode=data.get("icl_mode", True),
+            character=data.get("character"),
+            emotion=data.get("emotion"),
+            intensity=data.get("intensity"),
+            description=data.get("description"),
+            instruct=data.get("instruct"),
+            base_description=data.get("base_description"),
         )
 
 
@@ -104,6 +140,12 @@ class PromptStore:
         tags: list[str] | None = None,
         ref_text: str | None = None,
         ref_audio_duration_s: float | None = None,
+        character: str | None = None,
+        emotion: str | None = None,
+        intensity: str | None = None,
+        description: str | None = None,
+        instruct: str | None = None,
+        base_description: str | None = None,
     ) -> PromptMetadata:
         """Save a clone prompt to disk.
 
@@ -113,6 +155,12 @@ class PromptStore:
             tags: Optional tags for filtering.
             ref_text: Transcript of the reference audio.
             ref_audio_duration_s: Duration of reference audio in seconds.
+            character: Character name (voice library).
+            emotion: Emotion name, e.g. "angry" (voice library).
+            intensity: Intensity level, e.g. "medium" or "intense" (voice library).
+            description: Human-readable description of what this prompt sounds like.
+            instruct: The VoiceDesign instruct string used to generate this prompt.
+            base_description: The base voice description (physical traits only).
 
         Returns:
             PromptMetadata for the saved prompt.
@@ -147,6 +195,12 @@ class PromptStore:
             ref_audio_duration_s=ref_audio_duration_s,
             x_vector_only_mode=prompt_item.x_vector_only_mode,
             icl_mode=prompt_item.icl_mode,
+            character=character,
+            emotion=emotion,
+            intensity=intensity,
+            description=description,
+            instruct=instruct,
+            base_description=base_description,
         )
         json_path = self.prompts_dir / f"{name}.json"
         json_path.write_text(json.dumps(meta.to_dict(), indent=2, ensure_ascii=False), encoding="utf-8")
@@ -157,7 +211,7 @@ class PromptStore:
         self._cache[name] = prompt_item
         self._evict_cache()
 
-        logger.info("Saved clone prompt '%s' (tags=%s)", name, tags)
+        logger.info("Saved clone prompt '%s' (character=%s, emotion=%s, tags=%s)", name, character, emotion, tags)
         return meta
 
     def load_prompt(self, name: str, device: str = "cpu") -> object:
@@ -247,6 +301,69 @@ class PromptStore:
     def get_metadata(self, name: str) -> PromptMetadata | None:
         """Get metadata for a prompt without loading tensors."""
         return self._metadata.get(name)
+
+    def search_prompts(
+        self,
+        character: str | None = None,
+        emotion: str | None = None,
+        intensity: str | None = None,
+        tags: list[str] | None = None,
+    ) -> list[dict]:
+        """Search prompts by voice library fields.
+
+        All filters use AND logic. Returns metadata dicts sorted by name.
+
+        Args:
+            character: Filter by character name (case-insensitive).
+            emotion: Filter by emotion name (exact match).
+            intensity: Filter by intensity level (exact match).
+            tags: Filter by tags (all must match).
+
+        Returns:
+            List of matching prompt metadata dicts.
+        """
+        results = []
+        for meta in self._metadata.values():
+            if character and not meta.matches_character(character):
+                continue
+            if emotion and meta.emotion != emotion:
+                continue
+            if intensity and meta.intensity != intensity:
+                continue
+            if tags and not meta.matches_tags(tags):
+                continue
+            results.append(meta.to_dict())
+        return sorted(results, key=lambda x: x["name"])
+
+    def list_characters(self) -> list[dict]:
+        """List all characters with their available prompts.
+
+        Returns:
+            List of dicts with character name, prompt count, and available emotions.
+        """
+        chars: dict[str, dict] = {}
+        for meta in self._metadata.values():
+            if not meta.character:
+                continue
+            char = meta.character.lower()
+            if char not in chars:
+                chars[char] = {"character": meta.character, "prompt_count": 0, "emotions": set(), "modes": set()}
+            chars[char]["prompt_count"] += 1
+            if meta.emotion:
+                chars[char]["emotions"].add(meta.emotion)
+            # If no emotion/intensity, it's likely a mode
+            elif meta.tags:
+                for tag in meta.tags:
+                    if tag != meta.character:
+                        chars[char]["modes"].add(tag)
+
+        # Convert sets to sorted lists
+        result = []
+        for info in chars.values():
+            info["emotions"] = sorted(info["emotions"])
+            info["modes"] = sorted(info["modes"])
+            result.append(info)
+        return sorted(result, key=lambda x: x["character"])
 
     def _evict_cache(self) -> None:
         """Evict oldest entries if cache exceeds max size."""

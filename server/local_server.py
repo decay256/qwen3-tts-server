@@ -219,6 +219,10 @@ class LocalServer:
                 return await self._handle_create_clone_prompt(request)
             elif path == "/api/v1/voices/prompts" and method == "GET":
                 return await self._handle_list_prompts(request)
+            elif path == "/api/v1/voices/prompts/search" and method == "GET":
+                return await self._handle_search_prompts(request)
+            elif path == "/api/v1/voices/characters" and method == "GET":
+                return await self._handle_list_characters(request)
             elif path.startswith("/api/v1/voices/prompts/") and method == "DELETE":
                 return await self._handle_delete_prompt(request)
             elif path == "/api/v1/tts/clone-prompt" and method == "POST":
@@ -871,6 +875,42 @@ class LocalServer:
             headers={"Content-Type": "application/json"},
         )
 
+    async def _handle_search_prompts(self, request: TunnelMessage) -> TunnelMessage:
+        """GET /api/v1/voices/prompts/search — search prompts by voice library fields.
+
+        Query params: character, emotion, intensity, tags (comma-separated).
+        """
+        path = request.path or ""
+        params: dict[str, str] = {}
+        if "?" in path:
+            from urllib.parse import parse_qs, urlparse
+            qs = parse_qs(urlparse(path).query)
+            for key in ("character", "emotion", "intensity", "tags"):
+                if key in qs:
+                    params[key] = qs[key][0]
+
+        tags = params["tags"].split(",") if "tags" in params else None
+        prompts = self.prompt_store.search_prompts(
+            character=params.get("character"),
+            emotion=params.get("emotion"),
+            intensity=params.get("intensity"),
+            tags=tags,
+        )
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"prompts": prompts, "count": len(prompts)}),
+            headers={"Content-Type": "application/json"},
+        )
+
+    async def _handle_list_characters(self, request: TunnelMessage) -> TunnelMessage:
+        """GET /api/v1/voices/characters — list all characters in the voice library."""
+        characters = self.prompt_store.list_characters()
+        return TunnelMessage(
+            type=MessageType.RESPONSE, request_id=request.request_id,
+            body=json.dumps({"characters": characters, "count": len(characters)}),
+            headers={"Content-Type": "application/json"},
+        )
+
     async def _handle_synthesize_with_prompt(self, request: TunnelMessage) -> TunnelMessage:
         """POST /api/v1/tts/clone-prompt — synthesize with saved clone prompt."""
         err = self._require_base_model(request)
@@ -1009,6 +1049,12 @@ class LocalServer:
                             tags=all_tags,
                             ref_text=text,
                             ref_audio_duration_s=duration_s,
+                            character=item.get("character"),
+                            emotion=item.get("emotion"),
+                            intensity=item.get("intensity"),
+                            description=item.get("description"),
+                            instruct=instruct,
+                            base_description=item.get("base_description"),
                         )
                         result["prompt_created"] = True
                         result["prompt_tags"] = all_tags
@@ -1220,14 +1266,22 @@ class LocalServer:
                 if not text:
                     continue
                 instruct = f"{description}, {direction}" if direction else description
-                # Derive tags from key (e.g. "angry_full" → ["angry", "full"])
-                tags = key.split("_")
+                # Derive tags and emotion/intensity from key (e.g. "angry_full" → ["angry", "full"])
+                parts = key.split("_")
+                emotion = parts[0] if parts else key
+                intensity = parts[1] if len(parts) > 1 else "full"
                 items.append({
                     "name": f"{character}_{key}",
                     "text": text,
                     "instruct": instruct,
                     "language": language,
-                    "tags": tags,
+                    "tags": parts,
+                    # Voice library metadata
+                    "character": character,
+                    "emotion": emotion,
+                    "intensity": intensity,
+                    "description": f"{emotion} ({intensity}): {direction}" if direction else emotion,
+                    "base_description": description,
                 })
         else:
             # Preset mode: use built-in emotion presets
