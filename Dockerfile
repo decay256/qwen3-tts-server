@@ -47,6 +47,12 @@ COPY config.example.yaml .
 # Create directories for voice data
 RUN mkdir -p voices voice-prompts
 
+# Pre-download models into the image (avoids 5+ min download on cold start)
+RUN python3 -c "\
+from huggingface_hub import snapshot_download; \
+snapshot_download('Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign'); \
+snapshot_download('Qwen/Qwen3-TTS-12Hz-1.7B-Base')"
+
 # Default env
 ENV ENABLED_MODELS=voice_design,base
 ENV PORT=8000
