@@ -57,7 +57,7 @@ def init():
         engine = TTSEngine()
         logger.info("Loading TTS models...")
         engine.load_models()
-        logger.info("Models loaded: %s", engine.get_loaded_models())
+        logger.info("Models loaded: %s", list(engine._models.keys()))
 
         prompts_dir = os.environ.get("PROMPTS_DIR", "./voice-prompts")
         prompt_store = PromptStore(prompts_dir)
@@ -80,7 +80,7 @@ def handle_status():
     return {
         "status": "running",
         "tunnel_connected": True,
-        "models_loaded": engine.get_loaded_models() if engine else [],
+        "models_loaded": list(engine._models.keys()) if engine else [],
         "prompts_count": len(prompt_store.list_prompts()) if prompt_store else 0,
         "uptime_s": round(time.time() - start_time, 1) if start_time else 0,
         "gpu_available": torch.cuda.is_available(),
