@@ -14,34 +14,59 @@ import base64
 import gc
 import logging
 import os
+import sys
 import time
+import traceback
 
 import runpod
 
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── Global state ────────────────────────────────────────────────────
 engine = None
 prompt_store = None
 start_time = None
+init_error = None
 
 
 def init():
     """Load models once at worker startup."""
-    global engine, prompt_store, start_time
+    global engine, prompt_store, start_time, init_error
     start_time = time.time()
 
-    from server.tts_engine import TTSEngine
-    from server.prompt_store import PromptStore
+    try:
+        # Add server directory to path if needed
+        server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        if server_dir not in sys.path:
+            sys.path.insert(0, server_dir)
+            logger.info("Added %s to sys.path", server_dir)
 
-    engine = TTSEngine()
-    logger.info("Loading TTS models...")
-    engine.load_models()
-    logger.info("Models loaded: %s", engine.get_loaded_models())
+        logger.info("Python: %s", sys.version)
+        logger.info("CWD: %s", os.getcwd())
+        logger.info("Contents: %s", os.listdir("."))
 
-    prompts_dir = os.environ.get("PROMPTS_DIR", "./voice-prompts")
-    prompt_store = PromptStore(prompts_dir)
-    logger.info("Prompt store: %d prompts", len(prompt_store.list_prompts()))
+        import torch
+        logger.info("Torch: %s, CUDA: %s, GPU: %s",
+                     torch.__version__, torch.cuda.is_available(),
+                     torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none")
+
+        from server.tts_engine import TTSEngine
+        from server.prompt_store import PromptStore
+
+        engine = TTSEngine()
+        logger.info("Loading TTS models...")
+        engine.load_models()
+        logger.info("Models loaded: %s", engine.get_loaded_models())
+
+        prompts_dir = os.environ.get("PROMPTS_DIR", "./voice-prompts")
+        prompt_store = PromptStore(prompts_dir)
+        logger.info("Prompt store: %d prompts", len(prompt_store.list_prompts()))
+        logger.info("Init complete in %.1fs", time.time() - start_time)
+
+    except Exception as e:
+        init_error = traceback.format_exc()
+        logger.error("INIT FAILED: %s", init_error)
 
 
 def _audio_to_base64(audio_data: bytes) -> str:
@@ -199,6 +224,10 @@ def handler(event):
     req_key = inp.get("api_key", "")
     if api_key and req_key != api_key:
         return {"error": "Invalid API key"}
+
+    # Report init failure
+    if init_error:
+        return {"error": f"Server init failed: {init_error}"}
 
     route = ROUTES.get(endpoint)
     if not route:
