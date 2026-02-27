@@ -1,0 +1,33 @@
+# Slim inference-only image for RunPod serverless
+# Models stored on Network Volume, not baked into image
+#
+# Build: docker build -f Dockerfile.slim -t decay256/qwen3-tts-slim:latest .
+# ~3GB instead of ~12GB
+
+FROM nvidia/cuda:12.1.0-devel-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 python3-pip python3-dev git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# torch + inference deps only
+RUN pip3 install --no-cache-dir \
+    torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+RUN pip3 install --no-cache-dir numpy
+RUN pip3 install --no-cache-dir qwen-tts soundfile runpod huggingface_hub
+
+# Copy only the inference handler
+COPY server/runpod_slim.py /app/handler.py
+COPY server/tts_engine.py /app/server/tts_engine.py
+COPY server/config.py /app/server/config.py
+COPY server/__init__.py /app/server/__init__.py
+
+ENV HF_HOME=/runpod-volume/huggingface
+ENV ENABLED_MODELS=voice_design,base
+
+CMD ["python3", "handler.py"]
