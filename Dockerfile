@@ -28,7 +28,7 @@ WORKDIR /app
 
 # Python deps (install torch first for caching)
 RUN pip3 install --no-cache-dir \
-    torch==2.5.1 --index-url https://download.pytorch.org/whl/cu121
+    torch==2.5.1 torchaudio==2.5.1 --index-url https://download.pytorch.org/whl/cu121
 
 # Install numpy first (needed by qwen-tts during metadata generation)
 RUN pip3 install --no-cache-dir numpy
