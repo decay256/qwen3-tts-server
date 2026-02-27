@@ -81,7 +81,7 @@ def init():
         from server.tts_engine import TTSEngine
         engine = TTSEngine()
         engine.load_models()
-        logger.info("Models loaded: %s in %.1fs", engine.get_loaded_models(), time.time() - t0)
+        logger.info("Models loaded: %s in %.1fs", list(engine._models.keys()), time.time() - t0)
 
     except Exception:
         init_error = traceback.format_exc()
@@ -112,7 +112,7 @@ def handler(event):
             import torch
             return {
                 "status": "running",
-                "models_loaded": engine.get_loaded_models() if engine else [],
+                "models_loaded": list(engine._models.keys()) if engine else [],
                 "gpu": torch.cuda.get_device_name(0) if torch.cuda.is_available() else "none",
                 "gpu_mem_mb": round(torch.cuda.memory_allocated() / 1024 / 1024, 1) if torch.cuda.is_available() else 0,
             }
