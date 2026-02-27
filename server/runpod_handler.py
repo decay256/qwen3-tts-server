@@ -225,6 +225,10 @@ def handler(event):
     if api_key and req_key != api_key:
         return {"error": "Invalid API key"}
 
+    # Lazy init on first request
+    if engine is None and init_error is None:
+        init()
+
     # Report init failure
     if init_error:
         return {"error": f"Server init failed: {init_error}"}
@@ -246,6 +250,8 @@ def handler(event):
 # ── Startup ─────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-    init()
+    # Don't call init() here — let the handler do lazy init on first request.
+    # This ensures runpod.serverless.start() is called immediately so the worker
+    # registers as "ready" with RunPod, even before models are loaded.
+    logger.info("Starting RunPod handler (lazy init mode)...")
     runpod.serverless.start({"handler": handler})
