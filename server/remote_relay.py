@@ -525,7 +525,13 @@ class RemoteRelay:
             return web.json_response({"error": str(e)}, status=500)
 
     async def handle_websocket_tunnel(self, request: web.Request) -> web.WebSocketResponse:
-        """WebSocket endpoint for tunnel connections from local GPU machines."""
+        """WebSocket endpoint for tunnel connections from local GPU machines (auth required)."""
+        # Auth check before WebSocket upgrade — accepts header or query param
+        api_key = extract_api_key(request)
+        if not api_key:
+            api_key = request.query.get("api_key", "")
+        if not self.auth.verify(api_key):
+            return web.json_response({"error": "Unauthorized"}, status=401)
         ws = web.WebSocketResponse(max_msg_size=50 * 1024 * 1024)
         await ws.prepare(request)
 
@@ -540,7 +546,10 @@ class RemoteRelay:
         return ws
 
     async def handle_debug_ws(self, request: web.Request) -> web.WebSocketResponse:
-        """WebSocket endpoint for live debug events."""
+        """WebSocket endpoint for live debug events (auth required)."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
         ws = web.WebSocketResponse()
         await ws.prepare(request)
 
@@ -560,7 +569,10 @@ class RemoteRelay:
         return ws
 
     async def handle_debug_http(self, request: web.Request) -> web.Response:
-        """GET /api/v1/debug — recent debug events as JSON."""
+        """GET /api/v1/debug — recent debug events as JSON (auth required)."""
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
         import resource
         mem_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024  # Linux: KB→MB
         return web.json_response({
@@ -715,7 +727,7 @@ class RemoteRelay:
         Returns:
             Configured aiohttp Application.
         """
-        app = web.Application()
+        app = web.Application(client_max_size=10 * 1024 * 1024)  # 10MB body limit
 
         # API routes
         app.router.add_get("/api/v1/status", self.handle_status)
