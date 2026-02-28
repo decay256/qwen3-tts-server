@@ -283,4 +283,6 @@ if __name__ == "__main__":
     # This ensures runpod.serverless.start() is called immediately so the worker
     # registers as "ready" with RunPod, even before models are loaded.
     logger.info("Starting RunPod handler (lazy init mode)...")
+    if not os.environ.get("API_KEY"):
+        logger.warning("No API_KEY configured — requests are unauthenticated (RunPod auth layer still applies)")
     runpod.serverless.start({"handler": handler})

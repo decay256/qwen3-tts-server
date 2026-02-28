@@ -213,4 +213,6 @@ def handler(event):
 
 if __name__ == "__main__":
     logger.info("Starting TTS Slim handler (lazy init)...")
+    if not os.environ.get("API_KEY"):
+        logger.warning("No API_KEY configured — requests are unauthenticated (RunPod auth layer still applies)")
     runpod.serverless.start({"handler": handler})
