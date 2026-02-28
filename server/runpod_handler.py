@@ -35,6 +35,12 @@ def init():
     global engine, prompt_store, start_time, init_error
     start_time = time.time()
 
+    # Warn loudly if no API key is configured.  RunPod has its own auth layer
+    # so unauthenticated workers are still protected, but operators should set
+    # API_KEY so that callers can't spoof requests via the input payload.
+    if not os.environ.get("API_KEY"):
+        logger.warning("No API_KEY configured — requests are unauthenticated")
+
     try:
         # Add server directory to path if needed
         server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -131,7 +137,10 @@ def handle_batch_design(body):
                 metadata = {k: item.get(k) for k in
                             ["character", "emotion", "intensity", "description", "instruct", "base_description"]}
                 metadata["tags"] = item.get("tags", [])
-                prompt_result = engine.create_clone_prompt(audio_data, item["name"], item["text"], metadata=metadata)
+                # Re-encode audio_bytes to base64 — engine expects b64 string, not raw bytes
+                ref_audio_b64 = base64.b64encode(audio_bytes).decode()
+                # Engine signature: create_clone_prompt(ref_audio_b64, ref_text) — no name/metadata args
+                prompt_result = engine.create_clone_prompt(ref_audio_b64, item.get("ref_text", item["text"]))
                 if prompt_result:
                     prompt_store.save_prompt(item["name"], prompt_result,
                                             tags=metadata.get("tags", []), ref_text=item["text"],
@@ -155,9 +164,12 @@ def handle_cast(body):
 
 def handle_clone_prompt_create(body):
     audio_bytes = base64.b64decode(body["audio"])
+    # Re-encode to base64 string — engine expects b64 string, not raw bytes
+    ref_audio_b64 = base64.b64encode(audio_bytes).decode()
     metadata = {k: body.get(k) for k in
                 ["character", "emotion", "intensity", "description", "instruct", "base_description"]}
-    prompt_data = engine.create_clone_prompt(audio_bytes, body["name"], body.get("ref_text"), metadata=metadata)
+    # Engine signature: create_clone_prompt(ref_audio_b64, ref_text) — name is NOT an engine arg
+    prompt_data = engine.create_clone_prompt(ref_audio_b64, body.get("ref_text", ""))
     if prompt_data:
         prompt_store.save_prompt(body["name"], prompt_data,
                                 tags=body.get("tags", []), ref_text=body.get("ref_text", ""),

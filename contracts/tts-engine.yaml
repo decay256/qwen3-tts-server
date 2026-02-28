@@ -1,9 +1,16 @@
-version: "1.0"
+# Contract verified against TTSEngine source via inspect.signature()
+# Last verified: 2026-02-28
+version: "1.1"
 component: tts-engine
 maturity: mvp
 description: Core TTS synthesis engine wrapping Qwen3-TTS models.
 
 interface:
+  load_models:
+    description: Load enabled models (controlled by ENABLED_MODELS env var).
+    args: none
+    returns: none
+
   generate_voice_design:
     description: Synthesize speech using VoiceDesign model with text description.
     args:
@@ -11,42 +18,78 @@ interface:
       description: str (required) — voice description (pitch, texture, accent)
       language: str (default "Auto")
     returns: tuple[numpy.ndarray, int] — (wav_array, sample_rate)
+    note: Relay/handler field "instruct" maps to this "description" parameter.
 
   generate_voice_clone:
     description: Synthesize speech using Base model with reference audio.
     args:
       text: str (required) — text to synthesize
-      ref_audio_path: str (required) — path to reference WAV
-      ref_text: str (optional) — transcript of reference audio
+      ref_audio_b64: str (required) — base64-encoded reference audio
+      ref_text: str (default "") — transcript of reference audio
       language: str (default "Auto")
+      x_vector_only_mode: bool (default False) — use x-vector only (no ref_text needed)
     returns: tuple[numpy.ndarray, int] — (wav_array, sample_rate)
+
+  generate_custom_voice:
+    description: Synthesize using a built-in named speaker.
+    args:
+      text: str (required)
+      speaker: str (default "Ryan") — built-in speaker name
+      instruct: str (default "") — style instruction
+      language: str (default "Auto")
+    returns: tuple[numpy.ndarray, int]
 
   create_clone_prompt:
-    description: Create a reusable clone prompt from reference audio.
+    description: Create a reusable clone prompt tensor from reference audio.
     args:
       ref_audio_b64: str (required) — base64-encoded reference audio
-      name: str (required) — prompt name
-      ref_text: str (optional) — transcript
-      metadata: dict (optional) — rich metadata fields
-    returns: VoiceClonePromptItem
+      ref_text: str (default "") — transcript of reference audio
+      x_vector_only_mode: bool (default False)
+    returns: object — VoiceClonePromptItem (opaque, serialize with torch.save)
+    note: >
+      Does NOT accept a name or metadata — those are PromptStore concerns.
+      Callers must handle naming and persistence separately.
 
   synthesize_with_clone_prompt:
-    description: Synthesize speech using a saved clone prompt.
+    description: Synthesize speech using a previously created clone prompt.
     args:
       text: str (required) — text to synthesize
-      prompt_item: VoiceClonePromptItem (required)
+      prompt_item: object (required) — VoiceClonePromptItem from create_clone_prompt
       language: str (default "Auto")
     returns: tuple[numpy.ndarray, int] — (wav_array, sample_rate)
 
-  load_models:
-    description: Load enabled models (voice_design, base).
+  save_voice:
+    description: Save reference audio and metadata as a named voice.
+    args:
+      name: str (required) — voice name
+      ref_audio_b64: str (required) — base64-encoded reference audio
+      ref_text: str (default "") — transcript
+      description: str (default "") — voice description
+    returns: dict — {name, ref_audio_path, ref_text, description}
+
+  list_voices:
+    description: List all saved and built-in voices.
     args: none
-    returns: none
+    returns: list[dict] — [{name, type, description, ...}]
+
+  generate_with_saved_voice:
+    description: "[DEPRECATED/BROKEN] Synthesize using a saved voice. Has wrong kwarg name."
+    args:
+      text: str (required)
+      voice_name: str (required)
+      language: str (default "Auto")
+    returns: tuple[numpy.ndarray, int]
+    status: broken — uses reference_audio= instead of ref_audio=
+
+  get_health:
+    description: Return GPU/CPU health telemetry.
+    args: none
+    returns: dict — {device, gpu_name, gpu_memory_*, cpu_percent, ram_*, models_loaded}
 
 nfr:
-  latency_p99_ms: 30000  # typical sentence
+  latency_p99_ms: 30000
   gpu_memory_mb: 4000  # per model in bfloat16
 
 dependencies: []
 owned_by: tts-engine
-consumers: [relay, runpod-handler]
+consumers: [relay, runpod-handler, local-server]
