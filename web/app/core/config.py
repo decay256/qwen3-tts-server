@@ -30,7 +30,7 @@ class Settings(BaseSettings):
 
     # Email (Resend)
     resend_api_key: str = ""
-    email_from: str = "Voice Studio <noreply@voicestudio.app>"
+    email_from: str = "onboarding@resend.dev"  # TODO: switch to noreply@dk-eigenvektor.de after domain verification
 
     # LLM (configurable provider)
     llm_provider: str = "openai"  # "openai" or "anthropic"
