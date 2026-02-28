@@ -456,7 +456,56 @@ code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; f
 }
 
 /* Toolbar right side */
-.toolbar-right { display: flex; gap: 8px; align-items: center; }
+.toolbar-right { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+/* Custom preset visual distinction */
+.preset-row.custom-preset { border-left: 3px solid var(--accent); }
+.badge.custom { background: rgba(99,102,241,0.2); color: var(--accent-hover); border: 1px solid var(--accent); font-size: 10px; }
+
+/* Modal overlay */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 24px;
+  width: 100%;
+  max-width: 560px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.modal-header h3 { font-size: 18px; }
+
+.modal-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+
+@media (max-width: 768px) {
+  .modal-card { padding: 16px; }
+  .modal-actions { flex-direction: column-reverse; }
+  .modal-actions button { width: 100%; }
+}
 
 /* ── Mobile responsiveness ──────────────────────────────────── */
 

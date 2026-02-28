@@ -8,8 +8,3 @@
 {"ts":"2026-02-28T22:48:30Z","agent":"frontend-preset-crud","action":"frontend_component","detail":"Updated CharacterPage.tsx — modal, savePreset, deletePreset, createPreset, is_builtin badge, delete btn for custom, dynamic counts"}
 {"ts":"2026-02-28T22:49:00Z","agent":"frontend-preset-crud","action":"frontend_css","detail":"Updated App.css — modal overlay/card, custom-preset border, .badge.custom style, mobile responsive modal"}
 {"ts":"2026-02-28T22:49:30Z","agent":"frontend-preset-crud","action":"build","detail":"npm run build succeeded — 3.57s, 0 type errors"}
-{"ts":"2026-02-28T22:52:00Z","agent":"frontend-preset-crud","action":"pr_opened","detail":"PR #3 opened: https://github.com/decay256/qwen3-tts-server/pull/3","branch":"feature/preset-crud","tests":"81/81","build":"clean"}
-{"ts":"2026-02-28T22:52:23Z","agent":"backend-engineer","action":"decision","detail":"Root causes: (1) _forward_to_runpod returns binary audio causing JSONDecodeError in tts_proxy.tts_post → 500; (2) handle_synthesize_with_prompt tried RunPod for clone-prompt despite .pt files being local-only; (3) RunPod COMPLETED+error returned HTTP 200 masking failures"}
-{"ts":"2026-02-28T22:52:23Z","agent":"backend-engineer","action":"test-run","detail":"234 server tests + 19 web tests = 253 total, all pass on fix/play-500-error branch"}
-{"ts":"2026-02-28T22:53:11Z","agent":"backend-engineer","action":"pr-opened","detail":"PR #4 opened: https://github.com/decay256/qwen3-tts-server/pull/4","pr":4,"ref":"905dbd3"}
-{"ts":"2026-02-28T22:53:11Z","agent":"backend-engineer","action":"complete","detail":"3 root causes identified and fixed; 7 new tests; 253 total passing; PR #4 open on fix/play-500-error"}

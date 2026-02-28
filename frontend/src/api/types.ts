@@ -38,6 +38,7 @@ export interface EmotionPreset {
   ref_text_medium: string;
   ref_text_intense: string;
   tags: string[];
+  is_builtin: boolean;
 }
 
 export interface ModePreset {
@@ -46,6 +47,7 @@ export interface ModePreset {
   instruct: string;
   ref_text: string;
   tags: string[];
+  is_builtin: boolean;
 }
 
 export interface DesignResult {

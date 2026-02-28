@@ -17,6 +17,7 @@ interface EmotionPresetData {
   ref_text_medium: string;
   ref_text_intense: string;
   tags: string[];
+  is_builtin: boolean;
 }
 
 interface ModePresetData {
@@ -25,6 +26,7 @@ interface ModePresetData {
   instruct: string;
   ref_text: string;
   tags: string[];
+  is_builtin: boolean;
 }
 
 type PresetEntry = EmotionPresetData | ModePresetData;
@@ -42,6 +44,21 @@ interface PresetRow {
   instruct: string;
   text: string;
   original: PresetEntry;
+  is_builtin: boolean;
+}
+
+/* ── Add-preset form state ───────────────────────────────────── */
+
+interface AddPresetForm {
+  type: 'emotion' | 'mode';
+  name: string;
+  instruct_medium: string;
+  instruct_intense: string;
+  ref_text_medium: string;
+  ref_text_intense: string;
+  instruct: string;
+  ref_text: string;
+  tags: string;
 }
 
 /* ── Quick feedback buttons for LLM refinement ───────────────── */
@@ -74,6 +91,7 @@ function flattenPresets(presets: PresetsResponse): PresetRow[] {
       instruct: e.instruct_medium,
       text: e.ref_text_medium,
       original: e,
+      is_builtin: e.is_builtin,
     });
     rows.push({
       key: `${e.name}_intense`,
@@ -83,6 +101,7 @@ function flattenPresets(presets: PresetsResponse): PresetRow[] {
       instruct: e.instruct_intense,
       text: e.ref_text_intense,
       original: e,
+      is_builtin: e.is_builtin,
     });
   }
   for (const m of presets.modes) {
@@ -94,6 +113,7 @@ function flattenPresets(presets: PresetsResponse): PresetRow[] {
       instruct: m.instruct,
       text: m.ref_text,
       original: m,
+      is_builtin: m.is_builtin,
     });
   }
   return rows;
@@ -123,6 +143,21 @@ export function CharacterPage() {
   const [castProgress, setCastProgress] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [showTechnical, setShowTechnical] = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
+  const [savingPreset, setSavingPreset] = useState<string | null>(null);
+  const [deletingPreset, setDeletingPreset] = useState<string | null>(null);
+  const [addForm, setAddForm] = useState<AddPresetForm>({
+    type: 'emotion',
+    name: '',
+    instruct_medium: '',
+    instruct_intense: '',
+    ref_text_medium: '',
+    ref_text_intense: '',
+    instruct: '',
+    ref_text: '',
+    tags: '',
+  });
+  const [addingPreset, setAddingPreset] = useState(false);
 
   /* ── Load data ─────────────────────────────────────────────── */
 
@@ -316,6 +351,106 @@ export function CharacterPage() {
     }
   };
 
+  const savePreset = async (row: PresetRow) => {
+    setSavingPreset(row.key);
+    setError(null);
+    try {
+      if (row.type === 'emotion') {
+        // For emotion, we need both intensities. Find the sibling row.
+        const siblingIntensity = row.intensity === 'medium' ? 'intense' : 'medium';
+        const siblingKey = `${row.name}_${siblingIntensity}`;
+        const sibling = presets.find(p => p.key === siblingKey);
+        const body: Record<string, string> = {};
+        if (row.intensity === 'medium') {
+          body.instruct_medium = row.instruct;
+          body.ref_text_medium = row.text;
+          if (sibling) { body.instruct_intense = sibling.instruct; body.ref_text_intense = sibling.text; }
+        } else {
+          body.instruct_intense = row.instruct;
+          body.ref_text_intense = row.text;
+          if (sibling) { body.instruct_medium = sibling.instruct; body.ref_text_medium = sibling.text; }
+        }
+        await apiJson(`/api/v1/presets/emotions/${row.name}`, {
+          method: 'PATCH',
+          body: JSON.stringify(body),
+        });
+      } else {
+        await apiJson(`/api/v1/presets/modes/${row.name}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ instruct: row.instruct, ref_text: row.text }),
+        });
+      }
+      // Refresh presets from server so is_builtin flags update
+      const data = await apiJson<PresetsResponse>('/api/v1/presets');
+      setPresets(flattenPresets(data));
+    } catch (e) {
+      handleError(e, `Save "${row.name}"`);
+    } finally {
+      setSavingPreset(null);
+    }
+  };
+
+  const deletePreset = async (row: PresetRow) => {
+    if (!confirm(`Delete custom preset "${row.name}"? This cannot be undone.`)) return;
+    setDeletingPreset(row.name);
+    setError(null);
+    try {
+      const endpoint = row.type === 'emotion'
+        ? `/api/v1/presets/emotions/${row.name}`
+        : `/api/v1/presets/modes/${row.name}`;
+      await apiJson(endpoint, { method: 'DELETE' });
+      const data = await apiJson<PresetsResponse>('/api/v1/presets');
+      setPresets(flattenPresets(data));
+    } catch (e) {
+      handleError(e, `Delete "${row.name}"`);
+    } finally {
+      setDeletingPreset(null);
+    }
+  };
+
+  const createPreset = async () => {
+    if (!addForm.name.trim()) return;
+    setAddingPreset(true);
+    setError(null);
+    try {
+      const tags = addForm.tags.split(',').map(t => t.trim()).filter(Boolean);
+      if (addForm.type === 'emotion') {
+        await apiJson('/api/v1/presets/emotions', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: addForm.name.trim(),
+            instruct_medium: addForm.instruct_medium,
+            instruct_intense: addForm.instruct_intense,
+            ref_text_medium: addForm.ref_text_medium,
+            ref_text_intense: addForm.ref_text_intense,
+            tags,
+          }),
+        });
+      } else {
+        await apiJson('/api/v1/presets/modes', {
+          method: 'POST',
+          body: JSON.stringify({
+            name: addForm.name.trim(),
+            instruct: addForm.instruct,
+            ref_text: addForm.ref_text,
+            tags,
+          }),
+        });
+      }
+      const data = await apiJson<PresetsResponse>('/api/v1/presets');
+      setPresets(flattenPresets(data));
+      setShowAddModal(false);
+      setAddForm({
+        type: 'emotion', name: '', instruct_medium: '', instruct_intense: '',
+        ref_text_medium: '', ref_text_intense: '', instruct: '', ref_text: '', tags: '',
+      });
+    } catch (e) {
+      handleError(e, 'Create preset');
+    } finally {
+      setAddingPreset(false);
+    }
+  };
+
   const playPrompt = async (promptName: string) => {
     setGenerating(promptName);
     setPreview(null);
@@ -445,10 +580,17 @@ export function CharacterPage() {
           <div className="presets-toolbar">
             <div className="filter-group">
               <button className={`btn-filter ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
-              <button className={`btn-filter ${filter === 'emotions' ? 'active' : ''}`} onClick={() => setFilter('emotions')}>Emotions (18)</button>
-              <button className={`btn-filter ${filter === 'modes' ? 'active' : ''}`} onClick={() => setFilter('modes')}>Modes (13)</button>
+              <button className={`btn-filter ${filter === 'emotions' ? 'active' : ''}`} onClick={() => setFilter('emotions')}>
+                Emotions ({presets.filter(p => p.type === 'emotion' && p.intensity === 'medium').length})
+              </button>
+              <button className={`btn-filter ${filter === 'modes' ? 'active' : ''}`} onClick={() => setFilter('modes')}>
+                Modes ({presets.filter(p => p.type === 'mode').length})
+              </button>
             </div>
             <div className="toolbar-right">
+              <button onClick={() => setShowAddModal(true)} className="btn-secondary" title="Create a new custom preset">
+                ＋ Add Preset
+              </button>
               <button onClick={castAll} disabled={castingAll} className="btn-primary" title="Generate and save all emotion/mode variants as clone prompts">
                 {castingAll ? castProgress : '🎭 Cast All Presets'}
               </button>
@@ -463,7 +605,7 @@ export function CharacterPage() {
               const isRefining = refineKey === row.key;
 
               return (
-                <div key={row.key} className={`preset-row ${isExpanded ? 'expanded' : ''} ${hasPrompt ? 'has-prompt' : ''}`}>
+                <div key={row.key} className={`preset-row ${isExpanded ? 'expanded' : ''} ${hasPrompt ? 'has-prompt' : ''} ${!row.is_builtin ? 'custom-preset' : ''}`}>
                   {/* Compact header */}
                   <div className="preset-header" onClick={() => setExpanded(isExpanded ? null : row.key)}>
                     <div className="preset-label">
@@ -471,6 +613,7 @@ export function CharacterPage() {
                       <strong>{row.name}</strong>
                       <span className={`badge intensity-${row.intensity}`}>{row.intensity}</span>
                       {hasPrompt && <span className="badge cast" title="Already cast — clone prompt saved">✓ cast</span>}
+                      {!row.is_builtin && <span className="badge custom" title="Custom preset — editable and deletable">✎ custom</span>}
                     </div>
                     <div className="preset-summary">{row.instruct.slice(0, 60)}{row.instruct.length > 60 ? '...' : ''}</div>
                     <div className="preset-actions-compact">
@@ -490,6 +633,16 @@ export function CharacterPage() {
                       >
                         {isGenerating && generating === row.key + '_cast' ? '⏳' : '💾 Cast'}
                       </button>
+                      {!row.is_builtin && row.intensity !== 'intense' && (
+                        <button
+                          onClick={e => { e.stopPropagation(); deletePreset(row); }}
+                          disabled={deletingPreset === row.name}
+                          className="btn-sm btn-danger"
+                          title="Delete this custom preset"
+                        >
+                          {deletingPreset === row.name ? '⏳' : '🗑'}
+                        </button>
+                      )}
                       <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
                     </div>
                   </div>
@@ -527,6 +680,14 @@ export function CharacterPage() {
                         </button>
                         <button onClick={() => castSingle(row)} disabled={!!generating} className="btn-secondary btn-sm">
                           💾 Cast & Save
+                        </button>
+                        <button
+                          onClick={() => savePreset(row)}
+                          disabled={savingPreset === row.key}
+                          className="btn-sm"
+                          title={row.is_builtin ? 'Save as custom override (built-in stays intact)' : 'Save changes to server'}
+                        >
+                          {savingPreset === row.key ? '⏳ Saving...' : row.is_builtin ? '✎ Override & Save' : '✎ Save Changes'}
                         </button>
                         <button onClick={() => resetPreset(row.key)} className="btn-sm">↩ Reset</button>
                         <button
@@ -577,6 +738,122 @@ export function CharacterPage() {
             })}
           </div>
         </section>
+      )}
+
+      {/* ── Add Preset Modal ─────────────────────────────────── */}
+      {showAddModal && (
+        <div className="modal-overlay" onClick={() => setShowAddModal(false)}>
+          <div className="modal-card" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h3>Add Custom Preset</h3>
+              <button className="btn-link" onClick={() => setShowAddModal(false)}>✕</button>
+            </div>
+
+            <div className="form-row">
+              <label>Type</label>
+              <select
+                value={addForm.type}
+                onChange={e => setAddForm(f => ({ ...f, type: e.target.value as 'emotion' | 'mode' }))}
+              >
+                <option value="emotion">Emotion (medium + intense variants)</option>
+                <option value="mode">Mode (single variant)</option>
+              </select>
+            </div>
+
+            <div className="form-row">
+              <label>Name <span className="hint">(unique, lowercase recommended)</span></label>
+              <input
+                type="text"
+                placeholder="e.g. nostalgic"
+                value={addForm.name}
+                onChange={e => setAddForm(f => ({ ...f, name: e.target.value }))}
+              />
+            </div>
+
+            {addForm.type === 'emotion' ? (
+              <>
+                <div className="form-row">
+                  <label>Instruct — Medium</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. gently nostalgic, warmly remembering the past"
+                    value={addForm.instruct_medium}
+                    onChange={e => setAddForm(f => ({ ...f, instruct_medium: e.target.value }))}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Sample Text — Medium</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. I remember when we used to come here every summer."
+                    value={addForm.ref_text_medium}
+                    onChange={e => setAddForm(f => ({ ...f, ref_text_medium: e.target.value }))}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Instruct — Intense</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. overwhelmed with nostalgia, voice cracking with memory"
+                    value={addForm.instruct_intense}
+                    onChange={e => setAddForm(f => ({ ...f, instruct_intense: e.target.value }))}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Sample Text — Intense</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. This place hasn't changed at all. I can still see us, kids again, running through these halls."
+                    value={addForm.ref_text_intense}
+                    onChange={e => setAddForm(f => ({ ...f, ref_text_intense: e.target.value }))}
+                  />
+                </div>
+              </>
+            ) : (
+              <>
+                <div className="form-row">
+                  <label>Instruct</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. conspiratorial, hushed and urgent"
+                    value={addForm.instruct}
+                    onChange={e => setAddForm(f => ({ ...f, instruct: e.target.value }))}
+                  />
+                </div>
+                <div className="form-row">
+                  <label>Sample Text</label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Don't tell anyone, but I know what really happened."
+                    value={addForm.ref_text}
+                    onChange={e => setAddForm(f => ({ ...f, ref_text: e.target.value }))}
+                  />
+                </div>
+              </>
+            )}
+
+            <div className="form-row">
+              <label>Tags <span className="hint">(comma-separated, optional)</span></label>
+              <input
+                type="text"
+                placeholder="e.g. nostalgic, memories"
+                value={addForm.tags}
+                onChange={e => setAddForm(f => ({ ...f, tags: e.target.value }))}
+              />
+            </div>
+
+            <div className="modal-actions">
+              <button onClick={() => setShowAddModal(false)} className="btn-secondary">Cancel</button>
+              <button
+                onClick={createPreset}
+                disabled={addingPreset || !addForm.name.trim()}
+                className="btn-primary"
+              >
+                {addingPreset ? 'Creating...' : 'Create Preset'}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Voice Library Tab ────────────────────────────────── */}
