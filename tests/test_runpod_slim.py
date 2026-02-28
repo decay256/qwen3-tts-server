@@ -44,13 +44,13 @@ class MockTTSEngine:
         import numpy as np
         return np.zeros(12000, dtype=np.float32), 24000
 
-    def generate_voice_clone(self, ref_audio, ref_text, text, language="Auto"):
+    def generate_voice_clone(self, text, ref_audio_b64, ref_text="", language="Auto"):
         import numpy as np
         return np.zeros(7200, dtype=np.float32), 24000
 
-    def create_clone_prompt(self, ref_audio, name, ref_text=""):
+    def create_clone_prompt(self, ref_audio_b64: str, ref_text: str = "", x_vector_only_mode: bool = False):
         import torch
-        return {"codes": torch.zeros(1, 10), "name": name}
+        return {"codes": torch.zeros(1, 10)}
 
     def synthesize_with_clone_prompt(self, text, prompt_item, language="Auto"):
         import numpy as np
@@ -132,7 +132,7 @@ class TestRunpodSlimHandler(unittest.TestCase):
         import torch
         ref_wav = make_wav_bytes(0.2)
         with patch.dict(os.environ, {"API_KEY": "test-key-123"}):
-            result = self._call("/api/v1/voices/clone-prompt/create", {
+            result = self._call("/api/v1/voices/clone-prompt", {
                 "audio": base64.b64encode(ref_wav).decode(),
                 "ref_text": "Hello",
                 "name": "test_voice",
@@ -153,7 +153,7 @@ class TestRunpodSlimHandler(unittest.TestCase):
         prompt_b64 = base64.b64encode(buf.getvalue()).decode()
 
         with patch.dict(os.environ, {"API_KEY": "test-key-123"}):
-            result = self._call("/api/v1/tts/clone-prompt/synthesize", {
+            result = self._call("/api/v1/tts/clone-prompt", {
                 "prompt_data": prompt_b64,
                 "text": "Synthesize this",
             })

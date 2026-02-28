@@ -252,12 +252,11 @@ class TTSEngine:
 
         model_key = "base" if "base" in self._models else "base_small"
         model = self.get_model(model_key)
-        prompt = self._voice_prompts[voice_name]
 
         wavs, sr = model.generate_voice_clone(
             text=text,
             language=language,
-            reference_audio=str(self._voice_prompts[voice_name]),
+            ref_audio=str(self._voice_prompts[voice_name]),
         )
         return wavs[0], sr
 

@@ -5,9 +5,11 @@ On first boot, models are downloaded from HuggingFace to the volume.
 Subsequent boots load from local NVMe storage (~30s).
 
 Supported endpoints:
-  /api/v1/status         — health check
-  /api/v1/voices/design  — VoiceDesign synthesis
-  /api/v1/tts/synthesize — Clone-based synthesis (with ref audio)
+  /api/v1/status              — health check
+  /api/v1/voices/design       — VoiceDesign synthesis
+  /api/v1/tts/synthesize      — Clone-based synthesis (with ref audio)
+  /api/v1/voices/clone-prompt — Create a reusable clone prompt
+  /api/v1/tts/clone-prompt    — Synthesize with a saved clone prompt
 """
 
 import base64
@@ -72,6 +74,12 @@ def init():
     if init_done:
         return
     init_done = True
+
+    # Warn loudly if no API key is configured.  RunPod has its own auth layer
+    # so unauthenticated workers are still protected, but operators should set
+    # API_KEY so that callers can't spoof requests via the input payload.
+    if not os.environ.get("API_KEY"):
+        logger.warning("No API_KEY configured — requests are unauthenticated")
 
     t0 = time.time()
     try:
@@ -147,10 +155,12 @@ def handler(event):
         elif endpoint == "/api/v1/tts/synthesize":
             # Clone synthesis with ref audio
             text = body["text"]
-            ref_audio = base64.b64decode(body["ref_audio"])
+            ref_audio_bytes = base64.b64decode(body["ref_audio"])
+            ref_audio_b64 = base64.b64encode(ref_audio_bytes).decode()  # re-encode for engine
             ref_text = body.get("ref_text", "")
             language = body.get("language", "Auto")
-            wav_data, sr = engine.generate_voice_clone(ref_audio, ref_text, text, language)
+            # Correct arg order: text, ref_audio_b64, ref_text, language
+            wav_data, sr = engine.generate_voice_clone(text, ref_audio_b64, ref_text, language)
             audio_bytes, duration = _wav_to_bytes(wav_data, sr)
             gc.collect()
             return {
@@ -159,12 +169,14 @@ def handler(event):
                 "format": "wav",
             }
 
-        elif endpoint == "/api/v1/voices/clone-prompt/create":
+        elif endpoint == "/api/v1/voices/clone-prompt":
             # Create a clone prompt and return the tensor data
-            ref_audio = base64.b64decode(body["audio"])
+            ref_audio_bytes = base64.b64decode(body["audio"])
+            ref_audio_b64 = base64.b64encode(ref_audio_bytes).decode()  # re-encode for engine
             ref_text = body.get("ref_text", "")
             name = body["name"]
-            prompt_data = engine.create_clone_prompt(ref_audio, name, ref_text)
+            # Engine takes (ref_audio_b64, ref_text) — name is NOT an engine arg
+            prompt_data = engine.create_clone_prompt(ref_audio_b64, ref_text)
             gc.collect()
             # Serialize prompt to base64 for transport
             import io, torch
@@ -175,7 +187,7 @@ def handler(event):
                 "name": name,
             }
 
-        elif endpoint == "/api/v1/tts/clone-prompt/synthesize":
+        elif endpoint == "/api/v1/tts/clone-prompt":
             # Synthesize with a pre-computed clone prompt (sent as base64 tensor)
             import io, torch
             prompt_bytes = base64.b64decode(body["prompt_data"])
