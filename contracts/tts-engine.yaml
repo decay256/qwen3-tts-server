@@ -79,7 +79,7 @@ interface:
       voice_name: str (required)
       language: str (default "Auto")
     returns: tuple[numpy.ndarray, int]
-    status: broken — uses reference_audio= instead of ref_audio=
+    status: fixed in v1.1.4 — was using reference_audio= instead of ref_audio=
 
   get_health:
     description: Return GPU/CPU health telemetry.
