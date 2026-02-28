@@ -69,6 +69,20 @@ def init():
         logger.error("INIT FAILED: %s", init_error)
 
 
+def _wav_to_bytes(wav_data, sr: int) -> tuple:
+    """Convert wav tensor/array + sample rate to WAV bytes and duration."""
+    import io
+    import soundfile as sf
+    import numpy as np
+    if hasattr(wav_data, 'numpy'):
+        wav_data = wav_data.numpy()
+    wav_data = np.asarray(wav_data).flatten()
+    duration = len(wav_data) / sr
+    buf = io.BytesIO()
+    sf.write(buf, wav_data, sr, format='WAV')
+    return buf.getvalue(), duration
+
+
 def _audio_to_base64(audio_data: bytes) -> str:
     return base64.b64encode(audio_data).decode("utf-8")
 
@@ -91,9 +105,10 @@ def handle_design(body):
     text = body["text"]
     instruct = body["instruct"]
     language = body.get("language", "English")
-    audio_data, duration = engine.synthesize_voice_design(text, instruct, language)
+    wav_data, sr = engine.generate_voice_design(text, instruct, language)
+    audio_bytes, duration = _wav_to_bytes(wav_data, sr)
     gc.collect()
-    return {"audio": _audio_to_base64(audio_data), "duration_s": round(duration, 2), "format": "wav"}
+    return {"audio": _audio_to_base64(audio_bytes), "duration_s": round(duration, 2), "format": "wav"}
 
 
 def handle_batch_design(body):
@@ -102,13 +117,14 @@ def handle_batch_design(body):
     results = []
     for item in items:
         try:
-            audio_data, duration = engine.synthesize_voice_design(
+            wav_data, sr = engine.generate_voice_design(
                 item["text"], item["instruct"], item.get("language", "English")
             )
+            audio_bytes, duration = _wav_to_bytes(wav_data, sr)
             result = {
                 "name": item["name"],
                 "status": "ok",
-                "audio": _audio_to_base64(audio_data),
+                "audio": _audio_to_base64(audio_bytes),
                 "duration_s": round(duration, 2),
             }
             if create_prompts:
@@ -154,11 +170,12 @@ def handle_synthesize_with_prompt(body):
     prompt_data = prompt_store.load_prompt(prompt_name)
     if not prompt_data:
         return {"error": f"Prompt '{prompt_name}' not found"}
-    audio_data, duration = engine.synthesize_with_clone_prompt(
-        prompt_data, body["text"], body.get("language", "Auto")
+    wav_data, sr = engine.synthesize_with_clone_prompt(
+        text=body["text"], prompt_item=prompt_data, language=body.get("language", "Auto")
     )
+    audio_bytes, duration = _wav_to_bytes(wav_data, sr)
     gc.collect()
-    return {"audio": _audio_to_base64(audio_data), "duration_s": round(duration, 2), "format": "wav"}
+    return {"audio": _audio_to_base64(audio_bytes), "duration_s": round(duration, 2), "format": "wav"}
 
 
 def handle_list_prompts(body):

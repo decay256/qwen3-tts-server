@@ -40,21 +40,21 @@ class MockTTSEngine:
     def get_loaded_models(self):
         return list(self._models.keys())
 
-    def synthesize_voice_design(self, text, instruct, language="English"):
-        wav = make_wav_bytes(0.5)
-        return wav, 0.5
+    def generate_voice_design(self, text, instruct, language="English"):
+        import numpy as np
+        return np.zeros(12000, dtype=np.float32), 24000
 
-    def synthesize_clone(self, ref_audio, ref_text, text, language="Auto"):
-        wav = make_wav_bytes(0.3)
-        return wav, 0.3
+    def generate_voice_clone(self, ref_audio, ref_text, text, language="Auto"):
+        import numpy as np
+        return np.zeros(7200, dtype=np.float32), 24000
 
     def create_clone_prompt(self, ref_audio, name, ref_text=""):
         import torch
         return {"codes": torch.zeros(1, 10), "name": name}
 
-    def synthesize_with_clone_prompt(self, prompt_data, text, language="Auto"):
-        wav = make_wav_bytes(0.4)
-        return wav, 0.4
+    def synthesize_with_clone_prompt(self, text, prompt_item, language="Auto"):
+        import numpy as np
+        return np.zeros(9600, dtype=np.float32), 24000
 
 
 class TestRunpodSlimHandler(unittest.TestCase):

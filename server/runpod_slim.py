@@ -23,6 +23,20 @@ import runpod
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("tts-slim")
 
+def _wav_to_bytes(wav_data, sr: int) -> tuple:
+    """Convert wav tensor/array + sample rate to WAV bytes and duration."""
+    import io
+    import soundfile as sf
+    import numpy as np
+    if hasattr(wav_data, 'numpy'):
+        wav_data = wav_data.numpy()
+    wav_data = np.asarray(wav_data).flatten()
+    duration = len(wav_data) / sr
+    buf = io.BytesIO()
+    sf.write(buf, wav_data, sr, format='WAV')
+    return buf.getvalue(), duration
+
+
 # ── State ───────────────────────────────────────────────────────────
 engine = None
 init_error = None
@@ -121,10 +135,11 @@ def handler(event):
             text = body["text"]
             instruct = body["instruct"]
             language = body.get("language", "English")
-            audio_data, duration = engine.synthesize_voice_design(text, instruct, language)
+            wav_data, sr = engine.generate_voice_design(text, instruct, language)
+            audio_bytes, duration = _wav_to_bytes(wav_data, sr)
             gc.collect()
             return {
-                "audio": base64.b64encode(audio_data).decode(),
+                "audio": base64.b64encode(audio_bytes).decode(),
                 "duration_s": round(duration, 2),
                 "format": "wav",
             }
@@ -135,10 +150,11 @@ def handler(event):
             ref_audio = base64.b64decode(body["ref_audio"])
             ref_text = body.get("ref_text", "")
             language = body.get("language", "Auto")
-            audio_data, duration = engine.synthesize_clone(ref_audio, ref_text, text, language)
+            wav_data, sr = engine.generate_voice_clone(ref_audio, ref_text, text, language)
+            audio_bytes, duration = _wav_to_bytes(wav_data, sr)
             gc.collect()
             return {
-                "audio": base64.b64encode(audio_data).decode(),
+                "audio": base64.b64encode(audio_bytes).decode(),
                 "duration_s": round(duration, 2),
                 "format": "wav",
             }
@@ -166,10 +182,11 @@ def handler(event):
             prompt_data = torch.load(io.BytesIO(prompt_bytes), weights_only=False)
             text = body["text"]
             language = body.get("language", "Auto")
-            audio_data, duration = engine.synthesize_with_clone_prompt(prompt_data, text, language)
+            wav_data, sr = engine.synthesize_with_clone_prompt(text=text, prompt_item=prompt_data, language=language)
+            audio_bytes, duration = _wav_to_bytes(wav_data, sr)
             gc.collect()
             return {
-                "audio": base64.b64encode(audio_data).decode(),
+                "audio": base64.b64encode(audio_bytes).decode(),
                 "duration_s": round(duration, 2),
                 "format": "wav",
             }
