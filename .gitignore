@@ -20,3 +20,4 @@ config-relay.yaml
 tts_env/
 web/.env
 *.db
+.env.relay

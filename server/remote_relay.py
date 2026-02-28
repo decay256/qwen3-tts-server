@@ -22,6 +22,7 @@ import yaml
 from aiohttp import web
 
 from server.auth import AuthManager, extract_api_key
+from server.runpod_client import RunPodClient
 from server.tunnel import TunnelServer
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,17 @@ class RemoteRelay:
         self.host = remote.get("bind", "0.0.0.0")
         self.port = remote.get("port", 9800)
 
+        # RunPod fallback
+        runpod_cfg = config.get("runpod", {})
+        runpod_endpoint = runpod_cfg.get("endpoint_id") or os.environ.get("RUNPOD_ENDPOINT_ID", "")
+        runpod_key = runpod_cfg.get("api_key") or os.environ.get("RUNPOD_API_KEY", "")
+        if runpod_endpoint and runpod_key:
+            self.runpod = RunPodClient(runpod_endpoint, runpod_key, self.api_key)
+            logger.info("RunPod fallback configured: endpoint=%s", runpod_endpoint)
+        else:
+            self.runpod = None
+            logger.info("RunPod fallback not configured")
+
     def _check_auth(self, request: web.Request) -> bool:
         """Validate API key from request headers.
 
@@ -96,18 +108,94 @@ class RemoteRelay:
             )
         return None
 
+    @property
+    def has_gpu_backend(self) -> bool:
+        """Check if any GPU backend is available (tunnel or RunPod)."""
+        return self.tunnel_server.has_client or self.runpod is not None
+
     async def _require_tunnel(self) -> Optional[web.Response]:
         """Check if tunnel client is connected.
 
         Returns:
-            Error response if no client, None if OK.
+            Error response if no client AND no RunPod fallback, None if OK.
         """
-        if not self.tunnel_server.has_client:
+        if not self.tunnel_server.has_client and not self.runpod:
             return web.json_response(
-                {"error": "No GPU server connected. Start the local server first."},
+                {"error": "No GPU server connected and no RunPod fallback configured."},
                 status=503,
             )
         return None
+
+    async def _forward_to_runpod(
+        self, endpoint: str, body: dict | None = None, timeout: float = 90
+    ) -> web.Response:
+        """Forward a request to RunPod serverless.
+
+        Returns an aiohttp web.Response with the audio or JSON result.
+        """
+        try:
+            debug_event("runpod_forward_start", endpoint=endpoint)
+            result = await self.runpod.runsync(endpoint, body, timeout=timeout)
+            debug_event("runpod_forward_done", endpoint=endpoint, status=result.get("status"))
+
+            if result.get("status") == "COMPLETED":
+                output = result.get("output", {})
+                # If output has audio, decode and return as binary
+                if "audio" in output:
+                    audio_bytes = base64.b64decode(output["audio"])
+                    fmt = output.get("format", "wav")
+                    return web.Response(
+                        body=audio_bytes,
+                        status=200,
+                        content_type=f"audio/{fmt}",
+                        headers={
+                            "X-Duration-Seconds": str(output.get("duration_s", 0)),
+                            "X-Backend": "runpod",
+                            "X-Execution-Ms": str(result.get("executionTime", 0)),
+                        },
+                    )
+                # Otherwise return JSON
+                return web.json_response(output)
+            else:
+                error = result.get("error", "Unknown RunPod error")
+                return web.json_response({"error": error, "backend": "runpod"}, status=502)
+
+        except asyncio.TimeoutError:
+            return web.json_response({"error": "RunPod request timed out"}, status=504)
+        except Exception as e:
+            logger.exception("RunPod forward error")
+            return web.json_response({"error": f"RunPod error: {e}"}, status=502)
+
+    async def _forward_with_fallback(
+        self,
+        method: str,
+        path: str,
+        body: str | None = None,
+        runpod_endpoint: str | None = None,
+        runpod_body: dict | None = None,
+        timeout: float = 300,
+    ) -> web.Response:
+        """Forward to tunnel if connected, otherwise fall back to RunPod.
+
+        Args:
+            method: HTTP method for tunnel forwarding.
+            path: API path for tunnel forwarding.
+            body: Request body as JSON string (for tunnel).
+            runpod_endpoint: RunPod endpoint path (defaults to path).
+            runpod_body: RunPod body dict (defaults to parsed body).
+            timeout: Timeout in seconds.
+        """
+        if self.tunnel_server.has_client:
+            return await self._forward_to_local(method, path, body=body, timeout=timeout)
+        elif self.runpod:
+            rp_endpoint = runpod_endpoint or path
+            rp_body = runpod_body if runpod_body is not None else (json.loads(body) if body else {})
+            return await self._forward_to_runpod(rp_endpoint, rp_body, timeout=timeout)
+        else:
+            return web.json_response(
+                {"error": "No GPU backend available (tunnel disconnected, no RunPod configured)"},
+                status=503,
+            )
 
     async def _forward_to_local(
         self,
@@ -494,7 +582,7 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/voices/design", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/voices/design", body=body)
 
     async def handle_create_clone_prompt(self, request: web.Request) -> web.Response:
         """POST /api/v1/voices/clone-prompt — create persistent clone prompt."""
@@ -505,7 +593,7 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/voices/clone-prompt", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/voices/clone-prompt", body=body)
 
     async def handle_list_prompts(self, request: web.Request) -> web.Response:
         """GET /api/v1/voices/prompts — list saved clone prompts."""
@@ -564,7 +652,7 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/tts/clone-prompt", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/tts/clone-prompt", body=body)
 
     async def handle_list_emotions(self, request: web.Request) -> web.Response:
         """GET /api/v1/voices/emotions — list emotion presets."""
@@ -585,7 +673,7 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/voices/cast", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/voices/cast", body=body)
 
     async def handle_normalize(self, request: web.Request) -> web.Response:
         """POST /api/v1/audio/normalize — formant normalization."""
@@ -596,7 +684,7 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/audio/normalize", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/audio/normalize", body=body)
 
     async def handle_batch_design(self, request: web.Request) -> web.Response:
         """POST /api/v1/voices/design/batch — batch generate reference clips."""
@@ -608,7 +696,7 @@ class RemoteRelay:
             return tunnel_error
         body = await request.text()
         # Batch operations can be slow — use extended timeout
-        return await self._forward_to_local("POST", "/api/v1/voices/design/batch", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/voices/design/batch", body=body)
 
     async def handle_batch_clone_prompt(self, request: web.Request) -> web.Response:
         """POST /api/v1/voices/clone-prompt/batch — batch create clone prompts."""
@@ -619,7 +707,7 @@ class RemoteRelay:
         if tunnel_error:
             return tunnel_error
         body = await request.text()
-        return await self._forward_to_local("POST", "/api/v1/voices/clone-prompt/batch", body=body)
+        return await self._forward_with_fallback("POST", "/api/v1/voices/clone-prompt/batch", body=body)
 
     def create_app(self) -> web.Application:
         """Create the aiohttp application with all routes.
