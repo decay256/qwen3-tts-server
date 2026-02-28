@@ -61,11 +61,28 @@ async def tts_get(path: str, params: dict | None = None) -> dict:
 
 async def tts_post(path: str, body: dict | None = None) -> dict:
     """POST request to TTS relay."""
+    import json as _json
     try:
         client = _get_client()
         resp = await client.post(path, json=body)
         _handle_error(resp)
-        return resp.json()
+        try:
+            return resp.json()
+        except _json.JSONDecodeError:
+            # Relay returned non-JSON (e.g. unexpected binary audio).  Surface a
+            # clear error instead of letting the JSONDecodeError bubble up as a
+            # 500 Internal Server Error.
+            ct = resp.headers.get("content-type", "unknown")
+            logger.error(
+                "TTS relay returned non-JSON response for POST %s: content-type=%s len=%d",
+                path, ct, len(resp.content),
+            )
+            raise TTSRelayError(
+                502,
+                f"TTS relay returned unexpected binary/non-JSON response "
+                f"(content-type: {ct}). This is a relay bug — audio endpoints "
+                f"should return JSON with base64-encoded audio.",
+            )
     except httpx.ConnectError:
         raise TTSRelayError(502, "Cannot connect to TTS relay — server may be down")
     except httpx.TimeoutException:

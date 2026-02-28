@@ -213,3 +213,65 @@ async def test_delete_prompt(client: AsyncClient, auth_headers: dict):
 async def test_import_package_not_implemented(client: AsyncClient, auth_headers: dict):
     resp = await client.post("/api/v1/tts/voices/import", headers=auth_headers)
     assert resp.status_code == 501
+
+
+# ---------------------------------------------------------------------------
+# tts_proxy.tts_post — fix/play-500-error
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_tts_post_raises_502_on_binary_response(client: AsyncClient, auth_headers: dict):
+    """tts_proxy.tts_post must raise TTSRelayError(502), not JSONDecodeError,
+    when the relay returns an unexpected binary/non-JSON response.
+
+    This prevents a raw JSONDecodeError from bubbling up as HTTP 500.
+    The fix wraps resp.json() in a try/except and surfaces a clear 502.
+    """
+    from web.app.services.tts_proxy import TTSRelayError, tts_post
+    import httpx
+
+    binary_content = b"RIFF\x24\x00\x00\x00WAVEfmt \x10\x00\x00\x00"
+    fake_resp = httpx.Response(
+        status_code=200,
+        headers={"content-type": "audio/wav"},
+        content=binary_content,
+        request=httpx.Request("POST", "http://localhost:9800/api/v1/tts/clone-prompt"),
+    )
+
+    with patch(f"{PROXY_MODULE}._get_client") as mock_get_client:
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=fake_resp)
+        mock_get_client.return_value = mock_client
+
+        with pytest.raises(TTSRelayError) as exc_info:
+            await tts_post("/api/v1/tts/clone-prompt", {"voice_prompt": "kira", "text": "Hi"})
+
+    assert exc_info.value.status_code == 502
+    assert "audio/wav" in exc_info.value.detail or "binary" in exc_info.value.detail.lower()
+
+
+@pytest.mark.asyncio
+async def test_synthesize_returns_503_when_relay_returns_tunnel_required(
+    client: AsyncClient, auth_headers: dict
+):
+    """POST /api/v1/tts/synthesize should surface 503 with clear message
+    when the relay returns 503 tunnel_required (tunnel offline).
+    """
+    from web.app.services.tts_proxy import TTSRelayError
+
+    with patch(f"{PROXY_MODULE}.tts_post", new_callable=AsyncMock) as mock_post:
+        mock_post.side_effect = TTSRelayError(
+            503,
+            "Clone-prompt synthesis requires the local GPU to be connected. "
+            "Daniel's GPU tunnel is currently offline.",
+        )
+        resp = await client.post(
+            "/api/v1/tts/synthesize",
+            json={"voice_prompt": "kira_joy_medium", "text": "Hello"},
+            headers=auth_headers,
+        )
+
+    assert resp.status_code == 503
+    body = resp.json()
+    assert "tunnel" in body["detail"].lower() or "GPU" in body["detail"]

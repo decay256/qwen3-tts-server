@@ -1,1 +1,13 @@
 # agent activity log — do not edit manually
+{"ts":"2026-02-28T22:44:53Z","agent":"backend-engineer","action":"start","detail":"Investigating 500 error on POST /api/v1/tts/synthesize (Play button in Voice Studio)"}
+{"ts":"2026-02-28T22:45:00Z","agent":"frontend-preset-crud","action":"backend_model","detail":"Created web/app/models/preset.py — CustomPreset SQLAlchemy model with emotion and mode fields"}
+{"ts":"2026-02-28T22:46:00Z","agent":"frontend-preset-crud","action":"backend_routes","detail":"Rewrote web/app/routes/presets.py — added POST/PATCH/DELETE for /emotions and /modes, GET merges built-ins+custom"}
+{"ts":"2026-02-28T22:47:00Z","agent":"frontend-preset-crud","action":"backend_tests","detail":"Updated web/tests/test_presets.py — 30 tests covering CRUD, auth, user isolation, conflict, override semantics"}
+{"ts":"2026-02-28T22:47:30Z","agent":"frontend-preset-crud","action":"tests_result","detail":"30/30 preset tests pass; 81/81 total tests pass"}
+{"ts":"2026-02-28T22:48:00Z","agent":"frontend-preset-crud","action":"frontend_types","detail":"Updated api/types.ts — added is_builtin to EmotionPreset and ModePreset"}
+{"ts":"2026-02-28T22:48:30Z","agent":"frontend-preset-crud","action":"frontend_component","detail":"Updated CharacterPage.tsx — modal, savePreset, deletePreset, createPreset, is_builtin badge, delete btn for custom, dynamic counts"}
+{"ts":"2026-02-28T22:49:00Z","agent":"frontend-preset-crud","action":"frontend_css","detail":"Updated App.css — modal overlay/card, custom-preset border, .badge.custom style, mobile responsive modal"}
+{"ts":"2026-02-28T22:49:30Z","agent":"frontend-preset-crud","action":"build","detail":"npm run build succeeded — 3.57s, 0 type errors"}
+{"ts":"2026-02-28T22:52:00Z","agent":"frontend-preset-crud","action":"pr_opened","detail":"PR #3 opened: https://github.com/decay256/qwen3-tts-server/pull/3","branch":"feature/preset-crud","tests":"81/81","build":"clean"}
+{"ts":"2026-02-28T22:52:23Z","agent":"backend-engineer","action":"decision","detail":"Root causes: (1) _forward_to_runpod returns binary audio causing JSONDecodeError in tts_proxy.tts_post → 500; (2) handle_synthesize_with_prompt tried RunPod for clone-prompt despite .pt files being local-only; (3) RunPod COMPLETED+error returned HTTP 200 masking failures"}
+{"ts":"2026-02-28T22:52:23Z","agent":"backend-engineer","action":"test-run","detail":"234 server tests + 19 web tests = 253 total, all pass on fix/play-500-error branch"}

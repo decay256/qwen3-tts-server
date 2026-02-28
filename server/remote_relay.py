@@ -140,16 +140,29 @@ class RemoteRelay:
 
             if result.get("status") == "COMPLETED":
                 output = result.get("output", {})
-                # If output has audio, decode and return as binary
+
+                # Treat completed-but-errored jobs as proper HTTP errors so that
+                # callers get a non-2xx status (prevents proxy from returning a
+                # confusing 200 with {"error": "..."} body).
+                if isinstance(output, dict) and "error" in output and "audio" not in output:
+                    return web.json_response(
+                        {"error": output["error"], "backend": "runpod"},
+                        status=422,
+                    )
+
+                # If output has audio, return JSON with base64 so that the proxy
+                # layer (tts_proxy.tts_post) can parse it uniformly.  Previously
+                # this decoded to binary here which caused a JSONDecodeError in
+                # the proxy (the 500 bug).
                 if "audio" in output:
-                    audio_bytes = base64.b64decode(output["audio"])
-                    fmt = output.get("format", "wav")
-                    return web.Response(
-                        body=audio_bytes,
-                        status=200,
-                        content_type=f"audio/{fmt}",
+                    return web.json_response(
+                        {
+                            "audio": output["audio"],
+                            "format": output.get("format", "wav"),
+                            "duration_s": output.get("duration_s", 0),
+                            "sample_rate": output.get("sample_rate", 24000),
+                        },
                         headers={
-                            "X-Duration-Seconds": str(output.get("duration_s", 0)),
                             "X-Backend": "runpod",
                             "X-Execution-Ms": str(result.get("executionTime", 0)),
                         },
@@ -656,15 +669,35 @@ class RemoteRelay:
         return await self._forward_to_local("DELETE", f"/api/v1/voices/prompts/{name}")
 
     async def handle_synthesize_with_prompt(self, request: web.Request) -> web.Response:
-        """POST /api/v1/tts/clone-prompt — synthesize with saved clone prompt."""
+        """POST /api/v1/tts/clone-prompt — synthesize with saved clone prompt.
+
+        Clone-prompt synthesis requires the local GPU tunnel because the .pt
+        prompt files live only on Daniel's GPU machine.  RunPod fallback is
+        intentionally *not* used here: the RunPod worker starts with an empty
+        voice-prompts directory and would always return "Prompt not found".
+        """
         auth_error = await self._require_auth(request)
         if auth_error:
             return auth_error
-        tunnel_error = await self._require_tunnel()
-        if tunnel_error:
-            return tunnel_error
+
+        # Require an active tunnel — RunPod fallback cannot serve clone-prompt
+        # synthesis because the .pt voice files are local-GPU-only.
+        if not self.tunnel_server.has_client:
+            return web.json_response(
+                {
+                    "error": (
+                        "Clone-prompt synthesis requires the local GPU to be connected. "
+                        "Daniel's GPU tunnel is currently offline. "
+                        "Reconnect the GPU tunnel to use saved voice prompts."
+                    ),
+                    "code": "tunnel_required",
+                },
+                status=503,
+            )
+
         body = await request.text()
-        return await self._forward_with_fallback("POST", "/api/v1/tts/clone-prompt", body=body)
+        debug_event("clone_synth_start", body_len=len(body))
+        return await self._forward_to_local("POST", "/api/v1/tts/clone-prompt", body=body)
 
     async def handle_list_emotions(self, request: web.Request) -> web.Response:
         """GET /api/v1/voices/emotions — list emotion presets."""
