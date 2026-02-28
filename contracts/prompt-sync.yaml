@@ -1,0 +1,267 @@
+version: "1.0"
+component: prompt-sync
+maturity: design
+description: >
+  Interface contract for voice prompt storage and synchronization.
+  The reference implementation is GCSPromptStore (Google Cloud Storage).
+  Any object-storage-backed implementation (S3, Azure Blob, local-disk)
+  must satisfy this interface.
+
+  Purpose: Allow voice clone prompt files (.pt tensors) created on any GPU
+  backend to be automatically available on all other backends. A prompt
+  created on Daniel's 4090 can be used on RunPod, and vice versa.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# GCS CONFIGURATION (reference implementation)
+# ─────────────────────────────────────────────────────────────────────────────
+
+gcs_config:
+  bucket: eigen-backups-dkev
+  region: EU
+  storage_class: STANDARD
+  prefix: voice-prompts/
+  service_account: dkev-api-account@alpine-zodiac-422307-h6.iam.gserviceaccount.com
+  key_file: .secrets/gcloud-service-account.json
+  local_cache_dir: ~/.cache/qwen3-tts/voice-prompts/
+  note: >
+    Full bucket access is already granted to the service account.
+    The key file exists on the droplet. GPU backends (tunnel/RunPod workers)
+    receive GCS credentials via environment variables or the relay passing
+    signed URLs for individual operations.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTERFACE METHODS
+# ─────────────────────────────────────────────────────────────────────────────
+
+interface:
+
+  push:
+    description: >
+      Upload a prompt file to GCS after it has been created on a backend.
+      The relay calls this immediately after a successful create_clone_prompt().
+      Overwrites if already exists (idempotent).
+    args:
+      prompt_id: str (required) — unique identifier, used as GCS object name
+      local_path: str (required) — absolute path to the .pt file on the caller's filesystem
+      metadata: PromptMetadata (optional) — stored as GCS object metadata
+    returns: PushResult
+    timeout_s: 60
+    note: >
+      The caller is responsible for the local_path being valid. After push,
+      the local file is left in place (caller decides whether to delete).
+
+  pull:
+    description: >
+      Download a prompt file from GCS to the local cache directory.
+      Creates cache directory if it doesn't exist. Idempotent — skips download
+      if a valid cached copy already exists (use force=true to overwrite).
+    args:
+      prompt_id: str (required)
+      force: bool (default false) — re-download even if already cached
+    returns: PullResult
+    timeout_s: 60
+
+  ensure_local:
+    description: >
+      High-level method: guarantee the prompt is available in the local cache.
+      Calls pull() if not already cached. Returns the local file path.
+      This is the method backends call before synthesize().
+    args:
+      prompt_id: str (required)
+    returns: EnsureLocalResult
+    timeout_s: 60
+    note: >
+      Preferred over pull() for backends. Handles the cache-hit fast path.
+
+  list:
+    description: >
+      List all prompts in GCS storage. Returns metadata for each prompt.
+      Does NOT require downloading files.
+    args:
+      character: str (optional) — filter by character metadata field
+      tag: str (optional) — filter by tag metadata field
+      prefix: str (optional) — filter by prompt_id prefix
+    returns: list[PromptRecord]
+    timeout_s: 30
+
+  delete:
+    description: >
+      Delete a prompt from GCS. Optionally delete local cache copy.
+      Non-blocking — returns immediately after GCS deletion is confirmed.
+    args:
+      prompt_id: str (required)
+      delete_local: bool (default true) — also remove local cache file
+    returns: DeleteResult
+    timeout_s: 30
+
+  exists:
+    description: >
+      Check whether a prompt exists in GCS without downloading it.
+      Used for pre-flight checks before routing a synthesize request.
+    args:
+      prompt_id: str (required)
+    returns: ExistsResult
+    timeout_s: 10
+
+  get_signed_url:
+    description: >
+      Generate a time-limited signed URL for a prompt file.
+      Used when passing prompt access to a stateless backend (e.g. RunPod
+      worker) that has no GCS credentials but needs the file.
+    args:
+      prompt_id: str (required)
+      ttl_seconds: int (default 3600)
+      method: enum["GET", "PUT"] (default "GET")
+    returns: SignedUrlResult
+    timeout_s: 10
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHEMAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+schemas:
+
+  PromptMetadata:
+    character: str (optional) — character name (e.g. "maya", "narrator")
+    description: str (optional) — human-readable description
+    tags: list[str] (optional) — e.g. ["emotional", "whispering"]
+    source_backend: str (optional) — backend_id that created the prompt
+    source_backend_type: str (optional) — e.g. "tunnel", "runpod"
+    ref_text: str (optional) — transcript of source reference audio
+    x_vector_only: bool (optional) — was created in x-vector-only mode
+    created_at: str (ISO 8601)
+
+  PushResult:
+    prompt_id: str
+    gcs_path: str — full GCS path e.g. gs://eigen-backups-dkev/voice-prompts/maya-calm.pt
+    size_bytes: int
+    status: enum["uploaded", "already_exists"]
+    etag: str (optional)
+
+  PullResult:
+    prompt_id: str
+    local_path: str — absolute path to cached file
+    size_bytes: int
+    status: enum["downloaded", "already_cached"]
+    source: enum["gcs"]
+
+  EnsureLocalResult:
+    prompt_id: str
+    local_path: str — absolute path to cached .pt file, ready to use
+    cache_hit: bool — true if file was already local, false if downloaded
+    size_bytes: int
+
+  PromptRecord:
+    prompt_id: str
+    gcs_path: str
+    size_bytes: int
+    created_at: str (ISO 8601)
+    updated_at: str (ISO 8601)
+    metadata: PromptMetadata
+    local_cached: bool — whether current process has it in local cache
+
+  DeleteResult:
+    prompt_id: str
+    gcs_deleted: bool
+    local_deleted: bool
+
+  ExistsResult:
+    prompt_id: str
+    exists: bool
+    gcs_path: str (optional) — populated if exists=true
+    size_bytes: int (optional)
+
+  SignedUrlResult:
+    prompt_id: str
+    url: str — HTTPS signed URL
+    expires_at: str (ISO 8601)
+    method: enum["GET", "PUT"]
+
+# ─────────────────────────────────────────────────────────────────────────────
+# STORAGE LAYOUT
+# ─────────────────────────────────────────────────────────────────────────────
+
+gcs_object_layout:
+  description: >
+    All prompt objects are stored under the prefix "voice-prompts/" in the GCS
+    bucket. The object name IS the prompt_id (no subdirectories required, though
+    prompt_ids MAY contain slashes as logical grouping).
+
+  examples:
+    - "voice-prompts/maya-calm.pt"              # character/emotion
+    - "voice-prompts/narrator-neutral.pt"
+    - "voice-prompts/deep-echoes/chen-angry.pt" # slash-grouped by project
+    - "voice-prompts/designed_581272c4bd20.pt"  # auto-ID from voice design
+
+  metadata_keys:
+    # Stored as GCS object custom metadata (key-value strings)
+    - qwen3_character
+    - qwen3_description
+    - qwen3_tags          # JSON array as string
+    - qwen3_source_backend
+    - qwen3_source_backend_type
+    - qwen3_ref_text
+    - qwen3_x_vector_only
+    - qwen3_created_at
+
+local_cache_layout:
+  description: >
+    Local cache mirrors GCS object paths. The cache root is configurable
+    (default ~/.cache/qwen3-tts/voice-prompts/).
+  examples:
+    - "${CACHE_DIR}/maya-calm.pt"
+    - "${CACHE_DIR}/deep-echoes/chen-angry.pt"
+  cache_policy:
+    eviction: none (no automatic eviction in v1 — manual delete only)
+    validation: size-check against GCS metadata on cache hit
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CREDENTIAL DISTRIBUTION TO GPU BACKENDS
+# ─────────────────────────────────────────────────────────────────────────────
+
+credential_strategy:
+  tunnel_backend:
+    approach: relay_side_operations
+    detail: >
+      The TunnelBackend runs prompt push/pull on the relay side (droplet), not
+      on the GPU machine. The relay has the GCS key file. After create_clone_prompt
+      returns the .pt bytes from the tunnel, the relay calls prompt_store.push().
+      Before clone_prompt synthesis, relay calls prompt_store.ensure_local() and
+      passes the .pt file path (or bytes via tunnel request body).
+
+  runpod_backend:
+    approach: signed_url_injection
+    detail: >
+      RunPod workers are stateless and have no GCS credentials.
+      The relay calls prompt_store.get_signed_url() to get a short-lived
+      download URL, then passes it in the RunPod input payload as
+      "clone_prompt_url". The RunPod worker downloads the file to /tmp/,
+      uses it for synthesis, then discards it. Workers do NOT push to GCS.
+
+  lambda_backend:
+    approach: env_credential_injection
+    detail: >
+      Long-lived Lambda Labs instances receive GCS credentials via environment
+      variables (GOOGLE_APPLICATION_CREDENTIALS_JSON) at instance launch.
+      Can perform both push and pull operations independently.
+
+  vast_backend:
+    approach: signed_url_injection
+    detail: Same as RunPod (ephemeral workers, no credentials).
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ERROR CODES
+# ─────────────────────────────────────────────────────────────────────────────
+
+errors:
+  PROMPT_NOT_IN_GCS: prompt_id does not exist in GCS bucket
+  GCS_AUTH_FAILED: Service account credentials invalid or expired
+  GCS_QUOTA_EXCEEDED: GCS API quota exceeded
+  LOCAL_CACHE_WRITE_FAILED: Cannot write to local cache directory
+  UPLOAD_FAILED: GCS upload failed (network, permissions)
+  DOWNLOAD_FAILED: GCS download failed (network, permissions)
+  SIGNED_URL_FAILED: Could not generate signed URL
+
+owned_by: relay
+consumers: [tunnel-backend, runpod-backend, lambda-backend, relay-router]
+dependencies: [gcs-bucket: eigen-backups-dkev]

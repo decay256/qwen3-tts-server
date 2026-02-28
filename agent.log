@@ -1,1 +1,5 @@
 # agent activity log — do not edit manually
+{"ts":"2026-02-28T23:33:29Z","agent":"architect","action":"start","detail":"Beginning GPU backend abstraction design — reading existing code, planning contracts and docs"}
+{"ts":"2026-02-28T23:33:29Z","agent":"architect","action":"decision","detail":"Chose GCS push-on-create / pull-on-demand pattern — backends only download prompts they need"}
+{"ts":"2026-02-28T23:33:29Z","agent":"architect","action":"decision","detail":"Signed URL injection for RunPod/Vast; env credentials for Lambda — GCS key never leaves droplet"}
+{"ts":"2026-02-28T23:33:29Z","agent":"architect","action":"decision","detail":"TunnelBackend and RunPodBackend wrap existing classes via composition — zero rewrite of core GPU logic"}

@@ -1,0 +1,267 @@
+version: "1.0"
+component: gpu-backend
+maturity: design
+description: >
+  Uniform interface contract for all GPU backends.
+  Any backend (WebSocket tunnel, RunPod, Lambda, Vast.ai, etc.) MUST implement
+  this interface. The relay's routing logic interacts exclusively through this
+  contract — no backend-specific code is permitted in relay routing paths.
+
+# ─────────────────────────────────────────────────────────────────────────────
+# INTERFACE METHODS
+# All methods are async. Backends must be drop-in interchangeable.
+# ─────────────────────────────────────────────────────────────────────────────
+
+interface:
+
+  health:
+    description: >
+      Check whether the backend is reachable and ready to accept requests.
+      Called by the BackendRegistry for liveness probes and before routing.
+    args: none
+    returns: HealthResponse
+    timeout_s: 10
+    note: Must NOT raise — return HealthResponse with status=unhealthy on error.
+
+  synthesize:
+    description: >
+      Generate audio from text. The request carries a SynthesizeRequest that
+      encodes the synthesis mode (voice_design, custom_voice, clone, clone_prompt)
+      and all relevant parameters. The backend returns base64-encoded audio.
+    args:
+      request: SynthesizeRequest (required)
+    returns: SynthesizeResponse
+    timeout_s: 300
+    note: >
+      If synthesis mode requires a clone prompt (.pt file) and the backend does
+      not have it locally, it MUST call prompt_store.ensure_local(prompt_id)
+      before attempting synthesis. prompt_store is injected at backend construction.
+
+  list_voices:
+    description: >
+      List voices/prompts available on this backend. May include locally cached
+      GCS prompts, built-in speakers, and saved voice packages.
+    args: none
+    returns: list[VoiceInfo]
+    timeout_s: 30
+
+  create_clone_prompt:
+    description: >
+      Create a persistent clone prompt from reference audio and upload to GCS.
+      After the prompt is created on the backend, it MUST push the .pt file to
+      GCS via prompt_store.push(prompt_id, local_path, metadata).
+    args:
+      request: ClonePromptRequest (required)
+    returns: ClonePromptResponse
+    timeout_s: 120
+    note: >
+      Backends that cannot create prompts locally (e.g. stateless RunPod workers)
+      must declare capability clone_prompt_create: false. The relay will route
+      create_clone_prompt() requests only to capable backends.
+
+  delete_clone_prompt:
+    description: >
+      Delete a clone prompt from the backend's local cache and from GCS.
+      Backend calls prompt_store.delete(prompt_id) after local deletion.
+    args:
+      prompt_id: str (required)
+    returns: DeletePromptResponse
+    timeout_s: 30
+
+  list_clone_prompts:
+    description: >
+      List clone prompts available to this backend. MUST include both locally
+      cached prompts and all prompts available in GCS (from prompt_store.list()).
+    args:
+      character: str (optional) — filter by character name
+      tag: str (optional) — filter by tag
+    returns: list[ClonePromptInfo]
+    timeout_s: 30
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SCHEMAS
+# ─────────────────────────────────────────────────────────────────────────────
+
+schemas:
+
+  HealthResponse:
+    status: enum["healthy", "degraded", "unhealthy"]
+    backend_id: str — unique identifier for this backend instance
+    backend_type: enum["tunnel", "runpod", "lambda", "vast", "local"]
+    capabilities: Capabilities
+    latency_ms: int — last measured round-trip latency (0 if unknown)
+    error: str (optional) — reason if status != healthy
+    metadata:
+      gpu_name: str (optional)
+      vram_total_gb: float (optional)
+      vram_used_gb: float (optional)
+      gpu_temp_c: int (optional)
+      loaded_models: list[str]
+
+  Capabilities:
+    description: >
+      Declares what synthesis modes this backend supports. The relay uses this
+      to route requests to capable backends only.
+    voice_design: bool — supports VoiceDesign model
+    custom_voice: bool — supports built-in named speakers
+    clone: bool — supports one-shot voice clone from reference audio
+    clone_prompt_synthesize: bool — can synthesize with saved .pt clone prompts
+    clone_prompt_create: bool — can create new .pt clone prompts
+    batch: bool — supports batch synthesis endpoints
+
+  SynthesizeRequest:
+    mode: enum["voice_design", "custom_voice", "clone", "clone_prompt"]
+    text: str (required)
+    language: str (default "Auto")
+    output_format: enum["wav", "mp3", "ogg"] (default "wav")
+
+    # Mode: voice_design
+    voice_design_params:
+      instruct: str (required) — voice description
+      # maps to TTSEngine.generate_voice_design(description=...)
+
+    # Mode: custom_voice
+    custom_voice_params:
+      speaker: str (required) — built-in speaker name
+      instruct: str (optional) — style instruction
+
+    # Mode: clone
+    clone_params:
+      ref_audio_b64: str (required) — base64-encoded reference audio
+      ref_text: str (optional) — transcript of reference audio
+      x_vector_only_mode: bool (default false)
+
+    # Mode: clone_prompt
+    clone_prompt_params:
+      prompt_id: str (required) — GCS-synchronized prompt identifier
+      # backend must call prompt_store.ensure_local(prompt_id) before synthesis
+
+  SynthesizeResponse:
+    audio_b64: str — base64-encoded audio bytes
+    format: enum["wav", "mp3", "ogg"]
+    duration_s: float
+    sample_rate: int
+    backend_id: str — which backend served this request
+    backend_type: str
+    execution_ms: int — synthesis wall time
+    prompt_id: str (optional) — if clone_prompt mode, echo prompt_id
+
+  ClonePromptRequest:
+    prompt_id: str (required) — desired prompt identifier (used as GCS key)
+    ref_audio_b64: str (required) — base64-encoded reference audio
+    ref_text: str (optional) — transcript of reference audio
+    x_vector_only_mode: bool (default false)
+    metadata: ClonePromptMetadata (optional)
+
+  ClonePromptMetadata:
+    character: str (optional) — character name for voice library
+    description: str (optional)
+    tags: list[str] (optional)
+    source_backend: str (optional) — backend_id that created this prompt
+
+  ClonePromptResponse:
+    prompt_id: str
+    status: enum["created", "exists"]
+    gcs_path: str — GCS object path where prompt was uploaded
+    backend_id: str
+
+  DeletePromptResponse:
+    prompt_id: str
+    status: enum["deleted", "not_found"]
+    gcs_deleted: bool
+
+  ClonePromptInfo:
+    prompt_id: str
+    character: str (optional)
+    description: str (optional)
+    tags: list[str] (optional)
+    gcs_path: str
+    local_cached: bool — whether the .pt file exists in local cache
+    created_at: str (ISO 8601)
+    source_backend: str (optional)
+
+  VoiceInfo:
+    voice_id: str
+    name: str
+    type: enum["builtin", "clone", "design", "package"]
+    description: str (optional)
+    has_prompt: bool — whether a .pt file exists for this voice
+
+# ─────────────────────────────────────────────────────────────────────────────
+# CAPABILITIES MATRIX (per existing/planned backends)
+# ─────────────────────────────────────────────────────────────────────────────
+
+known_backends:
+  tunnel:
+    description: Daniel's RTX 4090 via WebSocket tunnel
+    voice_design: true
+    custom_voice: true
+    clone: true
+    clone_prompt_synthesize: true
+    clone_prompt_create: true
+    batch: true
+    notes: >
+      Wraps existing TunnelServer._forward_to_local() calls. No core logic changes.
+      Prompt files live on the Windows machine; TunnelBackend fetches them via
+      the tunnel when creating prompts, then uploads the bytes to GCS.
+
+  runpod:
+    description: RunPod serverless GPU endpoint
+    voice_design: true
+    custom_voice: true
+    clone: true
+    clone_prompt_synthesize: true  # After GCS sync is implemented
+    clone_prompt_create: false     # Stateless workers cannot persist .pt files
+    batch: true
+    notes: >
+      Wraps existing RunPodClient.runsync(). No core logic changes.
+      Before synthesizing with clone_prompt mode, RunPodBackend calls
+      prompt_store.ensure_local() to download from GCS, then passes the
+      file path in the RunPod request body (as base64 or GCS signed URL).
+
+  lambda:
+    description: Lambda Labs GPU instance (future)
+    voice_design: true
+    custom_voice: true
+    clone: true
+    clone_prompt_synthesize: true
+    clone_prompt_create: true
+    batch: true
+
+  vast:
+    description: Vast.ai spot GPU (future)
+    voice_design: true
+    custom_voice: true
+    clone: true
+    clone_prompt_synthesize: true
+    clone_prompt_create: false     # Ephemeral workers
+    batch: false
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ERROR CODES
+# ─────────────────────────────────────────────────────────────────────────────
+
+errors:
+  BACKEND_UNHEALTHY: Backend failed health check
+  CAPABILITY_UNAVAILABLE: Requested mode not supported by this backend
+  PROMPT_NOT_FOUND: Clone prompt not found locally or in GCS
+  PROMPT_SYNC_FAILED: Failed to download/upload prompt from/to GCS
+  SYNTHESIS_FAILED: Backend returned an error during synthesis
+  TIMEOUT: Backend did not respond within timeout
+  AUTH_FAILED: Backend rejected credentials
+
+# ─────────────────────────────────────────────────────────────────────────────
+# VERSIONING
+# ─────────────────────────────────────────────────────────────────────────────
+
+versioning:
+  policy: >
+    Interface version is checked at backend registration. Minor version bumps
+    are backwards-compatible (additive only). Major version bumps require relay
+    and all backends to be updated simultaneously.
+  current: "1.0"
+  minimum_compatible: "1.0"
+
+owned_by: relay
+consumers: [tunnel-backend, runpod-backend, lambda-backend, vast-backend]
+dependencies: [prompt-sync]
