@@ -43,13 +43,15 @@ class RunPodClient:
         ) as resp:
             return await resp.json()
 
-    async def runsync(self, endpoint: str, body: dict | None = None, timeout: float = 90) -> dict:
-        """Send a synchronous request to RunPod.
+    async def runsync(self, endpoint: str, body: dict | None = None, timeout: float = 300) -> dict:
+        """Send a request to RunPod. Uses /runsync first, falls back to async polling.
+
+        If /runsync times out (cold start), automatically switches to /run + polling.
 
         Args:
             endpoint: The TTS API endpoint path (e.g. /api/v1/voices/design)
             body: Request body for the endpoint
-            timeout: Timeout in seconds (RunPod default is 90s)
+            timeout: Total timeout in seconds (including cold start wait)
 
         Returns:
             RunPod response dict with status, output/error, timing info.
@@ -62,13 +64,41 @@ class RunPodClient:
                 "api_key": self.tts_api_key,
             }
         }
-        async with session.post(
-            f"{self.base_url}/runsync",
-            json=payload,
-            headers={"Authorization": f"Bearer {self.runpod_api_key}"},
-            timeout=aiohttp.ClientTimeout(total=timeout),
-        ) as resp:
-            return await resp.json()
+
+        # Try /runsync first (fast path when worker is warm)
+        try:
+            async with session.post(
+                f"{self.base_url}/runsync",
+                json=payload,
+                headers={"Authorization": f"Bearer {self.runpod_api_key}"},
+                timeout=aiohttp.ClientTimeout(total=90),
+            ) as resp:
+                result = await resp.json()
+                if result.get("status") in ("COMPLETED", "FAILED"):
+                    return result
+                # If IN_QUEUE or IN_PROGRESS, fall through to polling
+                job_id = result.get("id", "")
+        except asyncio.TimeoutError:
+            logger.info("RunPod /runsync timed out, switching to async polling")
+            # Submit async job
+            job_id = await self.run_async(endpoint, body)
+
+        # Poll for result
+        if not job_id:
+            return {"status": "FAILED", "error": "No job ID returned"}
+
+        deadline = time.time() + timeout
+        poll_interval = 2.0
+        while time.time() < deadline:
+            await asyncio.sleep(poll_interval)
+            result = await self.poll_status(job_id)
+            status = result.get("status", "")
+            if status in ("COMPLETED", "FAILED"):
+                return result
+            # Back off polling interval
+            poll_interval = min(poll_interval * 1.5, 10.0)
+
+        return {"status": "FAILED", "error": f"RunPod job {job_id} timed out after {timeout}s"}
 
     async def run_async(self, endpoint: str, body: dict | None = None) -> str:
         """Send an async request, return job ID."""
