@@ -1,0 +1,4 @@
+api_key: "T6LZfkPVlnKkX4kEsDPekctsjGJMKxKdqDumLHcvrC0"
+remote:
+  bind: "0.0.0.0"
+  port: 9800

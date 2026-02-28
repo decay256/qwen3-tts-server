@@ -1,0 +1,13 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run tests
+        run: echo "Add your test commands here"
+      - name: Render docs
+        run: |
+          npm install -g @mermaid-js/mermaid-cli 2>/dev/null || true
+          mmdc -i ORCHESTRATION.md -o docs/orchestration.pdf --pdfFit 2>/dev/null || echo "Mermaid render skipped"
