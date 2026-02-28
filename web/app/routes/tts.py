@@ -9,8 +9,14 @@ from pydantic import BaseModel
 from web.app.models.user import User
 from web.app.routes.deps import get_current_user
 from web.app.services import tts_proxy
+from web.app.services.tts_proxy import TTSRelayError
 
 router = APIRouter(prefix="/api/v1/tts", tags=["tts"])
+
+
+def _relay_or_raise(e: TTSRelayError):
+    """Convert TTSRelayError to HTTPException with relay detail."""
+    raise HTTPException(status_code=e.status_code, detail=e.detail)
 
 
 # ── Status ──────────────────────────────────────────────────────────
@@ -19,7 +25,18 @@ router = APIRouter(prefix="/api/v1/tts", tags=["tts"])
 @router.get("/status")
 async def get_status(user: User = Depends(get_current_user)):
     """Get TTS server status (GPU connection, models loaded, etc.)."""
-    return await tts_proxy.tts_get("/api/v1/status")
+    try:
+        return await tts_proxy.tts_get("/api/v1/status")
+    except TTSRelayError as e:
+        # Return degraded status instead of error for the status endpoint
+        return {
+            "status": "error",
+            "tunnel_connected": False,
+            "models_loaded": [],
+            "prompts_count": 0,
+            "runpod_available": False,
+            "error": e.detail,
+        }
 
 
 # ── Voice Library (read) ────────────────────────────────────────────
@@ -87,7 +104,10 @@ class DesignRequest(BaseModel):
 @router.post("/voices/design")
 async def design_voice(body: DesignRequest, user: User = Depends(get_current_user)):
     """Generate a single voice design clip."""
-    return await tts_proxy.tts_post("/api/v1/voices/design", body.model_dump())
+    try:
+        return await tts_proxy.tts_post("/api/v1/voices/design", body.model_dump())
+    except TTSRelayError as e:
+        _relay_or_raise(e)
 
 
 class CastRequest(BaseModel):
@@ -104,7 +124,10 @@ class CastRequest(BaseModel):
 @router.post("/voices/cast")
 async def cast_voice(body: CastRequest, user: User = Depends(get_current_user)):
     """Run full emotion casting for a character."""
-    return await tts_proxy.tts_post("/api/v1/voices/cast", body.model_dump(exclude_none=True))
+    try:
+        return await tts_proxy.tts_post("/api/v1/voices/cast", body.model_dump(exclude_none=True))
+    except TTSRelayError as e:
+        _relay_or_raise(e)
 
 
 @router.delete("/voices/prompts/{name}")
@@ -126,7 +149,10 @@ class SynthesizeRequest(BaseModel):
 @router.post("/synthesize")
 async def synthesize(body: SynthesizeRequest, user: User = Depends(get_current_user)):
     """Synthesize text using a saved clone prompt."""
-    return await tts_proxy.tts_post("/api/v1/tts/clone-prompt", body.model_dump())
+    try:
+        return await tts_proxy.tts_post("/api/v1/tts/clone-prompt", body.model_dump())
+    except TTSRelayError as e:
+        _relay_or_raise(e)
 
 
 # ── LLM Refinement ─────────────────────────────────────────────────

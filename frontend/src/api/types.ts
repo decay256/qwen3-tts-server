@@ -26,6 +26,8 @@ export interface TTSStatus {
   tunnel_connected: boolean;
   models_loaded: string[];
   prompts_count: number;
+  runpod_available?: boolean;
+  error?: string;
 }
 
 export interface EmotionPreset {
@@ -56,4 +58,13 @@ export interface RefineResult {
   new_instruct: string;
   new_base_description: string | null;
   explanation: string;
+}
+
+/** Connection status with details */
+export interface ConnectionInfo {
+  gpu_tunnel: boolean;
+  runpod: 'ready' | 'cold' | 'unavailable' | 'unknown';
+  active_backend: 'tunnel' | 'runpod' | 'none';
+  error?: string;
+  runpod_workers?: { ready: number; idle: number; initializing: number };
 }

@@ -24,50 +24,65 @@ def _get_client() -> httpx.AsyncClient:
     return _client
 
 
+class TTSRelayError(Exception):
+    """Error from TTS relay with status code and detail."""
+    def __init__(self, status_code: int, detail: str):
+        self.status_code = status_code
+        self.detail = detail
+        super().__init__(detail)
+
+
+def _handle_error(resp: httpx.Response) -> None:
+    """Raise TTSRelayError with useful details on non-2xx responses."""
+    if resp.is_success:
+        return
+    try:
+        body = resp.json()
+        detail = body.get("detail", body.get("error", str(body)))
+    except Exception:
+        detail = resp.text[:500] if resp.text else f"HTTP {resp.status_code}"
+
+    logger.warning("TTS relay error: %s %s → %d: %s", resp.request.method, resp.request.url, resp.status_code, detail)
+    raise TTSRelayError(resp.status_code, detail)
+
+
 async def tts_get(path: str, params: dict | None = None) -> dict:
-    """GET request to TTS relay.
-
-    Args:
-        path: API path (e.g., "/api/v1/voices/characters").
-        params: Query parameters.
-
-    Returns:
-        Parsed JSON response.
-
-    Raises:
-        httpx.HTTPStatusError: On non-2xx response.
-    """
-    client = _get_client()
-    resp = await client.get(path, params=params)
-    resp.raise_for_status()
-    return resp.json()
+    """GET request to TTS relay."""
+    try:
+        client = _get_client()
+        resp = await client.get(path, params=params)
+        _handle_error(resp)
+        return resp.json()
+    except httpx.ConnectError:
+        raise TTSRelayError(502, "Cannot connect to TTS relay — server may be down")
+    except httpx.TimeoutException:
+        raise TTSRelayError(504, "TTS relay timed out — GPU may be cold-starting")
 
 
 async def tts_post(path: str, body: dict | None = None) -> dict:
-    """POST request to TTS relay.
-
-    Args:
-        path: API path.
-        body: JSON body.
-
-    Returns:
-        Parsed JSON response.
-
-    Raises:
-        httpx.HTTPStatusError: On non-2xx response.
-    """
-    client = _get_client()
-    resp = await client.post(path, json=body)
-    resp.raise_for_status()
-    return resp.json()
+    """POST request to TTS relay."""
+    try:
+        client = _get_client()
+        resp = await client.post(path, json=body)
+        _handle_error(resp)
+        return resp.json()
+    except httpx.ConnectError:
+        raise TTSRelayError(502, "Cannot connect to TTS relay — server may be down")
+    except httpx.TimeoutException:
+        raise TTSRelayError(504, "TTS relay timed out — GPU may be cold-starting")
 
 
 async def tts_delete(path: str) -> dict:
     """DELETE request to TTS relay."""
-    client = _get_client()
-    resp = await client.delete(path)
-    resp.raise_for_status()
-    return resp.json()
+    try:
+        client = _get_client()
+        resp = await client.delete(path)
+        _handle_error(resp)
+        return resp.json()
+    except httpx.ConnectError:
+        raise TTSRelayError(502, "Cannot connect to TTS relay — server may be down")
+    except httpx.TimeoutException:
+        raise TTSRelayError(504, "TTS relay timed out — GPU may be cold-starting")
 
 
 async def close_client() -> None:

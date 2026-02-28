@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiJson } from '../api/client';
 import { AudioPlayer } from '../components/AudioPlayer';
+import { ConnectionStatus } from '../components/ConnectionStatus';
 import type { Character, VoicePrompt, DesignResult, RefineResult } from '../api/types';
 
 /* ── Types ──────────────────────────────────────────────────────── */
@@ -33,16 +34,32 @@ interface PresetsResponse {
   modes: ModePresetData[];
 }
 
-/* A flattened row for display: one per castable variant */
 interface PresetRow {
-  key: string;           // e.g. "happy_medium" or "laughing"
-  name: string;          // emotion/mode name
+  key: string;
+  name: string;
   type: 'emotion' | 'mode';
-  intensity: string;     // "medium" | "intense" | "full"
-  instruct: string;      // editable
-  text: string;          // editable
-  original: PresetEntry; // for reset
+  intensity: string;
+  instruct: string;
+  text: string;
+  original: PresetEntry;
 }
+
+/* ── Quick feedback buttons for LLM refinement ───────────────── */
+
+const QUICK_FEEDBACK = [
+  'Too nasal',
+  'Not enough emotion',
+  'Too much emotion',
+  'Pitch too high',
+  'Pitch too low',
+  'Too breathy',
+  'Sounds robotic',
+  'Wrong accent',
+  'Too fast',
+  'Too slow',
+  'Needs more warmth',
+  'Too aggressive',
+];
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 
@@ -88,40 +105,24 @@ export function CharacterPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  // Character
   const [character, setCharacter] = useState<Character | null>(null);
   const [baseDesc, setBaseDesc] = useState('');
   const [savingDesc, setSavingDesc] = useState(false);
-
-  // Presets
   const [presets, setPresets] = useState<PresetRow[]>([]);
-  const [, setPresetsLoaded] = useState(false);
-
-  // Existing prompts (voice library)
   const [prompts, setPrompts] = useState<VoicePrompt[]>([]);
-
-  // Preview
   const [preview, setPreview] = useState<{ audio: string; format: string; label: string } | null>(null);
-  const [generating, setGenerating] = useState<string | null>(null); // key of what's generating
-
-  // Expanded preset editor
+  const [generating, setGenerating] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-
-  // Tab
   const [tab, setTab] = useState<'presets' | 'library'>('presets');
-
-  // Filter
   const [filter, setFilter] = useState<'all' | 'emotions' | 'modes'>('all');
-
-  // Refine
   const [refineKey, setRefineKey] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
   const [refining, setRefining] = useState(false);
   const [refineResult, setRefineResult] = useState<RefineResult | null>(null);
-
-  // Casting
   const [castingAll, setCastingAll] = useState(false);
   const [castProgress, setCastProgress] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [showTechnical, setShowTechnical] = useState(false);
 
   /* ── Load data ─────────────────────────────────────────────── */
 
@@ -134,18 +135,34 @@ export function CharacterPage() {
 
   useEffect(() => {
     apiJson<PresetsResponse>('/api/v1/presets')
-      .then(data => { setPresets(flattenPresets(data)); setPresetsLoaded(true); })
-      .catch(() => setPresetsLoaded(true));
+      .then(data => setPresets(flattenPresets(data)))
+      .catch(() => {});
   }, []);
 
   const loadPrompts = useCallback(() => {
     if (!character) return;
     apiJson<{ prompts: VoicePrompt[] }>(
       `/api/v1/tts/voices/prompts/search?character=${character.name.toLowerCase()}`
-    ).then(d => setPrompts(d.prompts)).catch(() => {});
+    ).then(d => setPrompts(d.prompts || [])).catch(() => {});
   }, [character]);
 
   useEffect(() => { loadPrompts(); }, [loadPrompts]);
+
+  /* ── Error display helper ──────────────────────────────────── */
+
+  const handleError = (e: unknown, context: string) => {
+    const msg = (e as Error).message;
+    let detail = msg;
+    if (msg.includes('502') || msg.includes('503')) {
+      detail = `${context}: GPU backend unreachable. Check connection status on dashboard.`;
+    } else if (msg.includes('504') || msg.includes('timeout')) {
+      detail = `${context}: Request timed out. The GPU may be cold-starting (~30s).`;
+    } else {
+      detail = `${context}: ${msg}`;
+    }
+    setError(detail);
+    setTimeout(() => setError(null), 10000);
+  };
 
   /* ── Actions ───────────────────────────────────────────────── */
 
@@ -159,7 +176,7 @@ export function CharacterPage() {
       });
       setCharacter(updated);
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, 'Save description');
     } finally {
       setSavingDesc(false);
     }
@@ -191,6 +208,7 @@ export function CharacterPage() {
     if (!character) return;
     setGenerating(row.key);
     setPreview(null);
+    setError(null);
     try {
       const fullInstruct = `${baseDesc}, ${row.instruct}`;
       const result = await apiJson<DesignResult>('/api/v1/tts/voices/design', {
@@ -199,7 +217,7 @@ export function CharacterPage() {
       });
       setPreview({ audio: result.audio, format: 'wav', label: `${row.name} (${row.intensity})` });
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, `Preview "${row.name} ${row.intensity}"`);
     } finally {
       setGenerating(null);
     }
@@ -207,7 +225,8 @@ export function CharacterPage() {
 
   const castSingle = async (row: PresetRow) => {
     if (!character) return;
-    setGenerating(row.key);
+    setGenerating(row.key + '_cast');
+    setError(null);
     try {
       const fullInstruct = `${baseDesc}, ${row.instruct}`;
       const promptName = `${character.name.toLowerCase()}_${row.key}`;
@@ -222,10 +241,10 @@ export function CharacterPage() {
           tags: [row.name, row.intensity, ...(row.type === 'mode' ? ['mode'] : ['emotion'])],
         }),
       });
-      setPreview({ audio: result.audio, format: 'wav', label: `${row.name} (${row.intensity}) — saved` });
+      setPreview({ audio: result.audio, format: 'wav', label: `${row.name} (${row.intensity}) — saved as clone prompt` });
       loadPrompts();
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, `Cast "${row.name} ${row.intensity}"`);
     } finally {
       setGenerating(null);
     }
@@ -234,9 +253,9 @@ export function CharacterPage() {
   const castAll = async () => {
     if (!character) return;
     setCastingAll(true);
+    setError(null);
     setCastProgress('Building batch...');
     try {
-      // Build batch from current (possibly edited) presets
       const items = presets.map(row => ({
         name: `${character.name.toLowerCase()}_${row.key}`,
         text: row.text,
@@ -250,7 +269,7 @@ export function CharacterPage() {
         base_description: baseDesc,
       }));
 
-      setCastProgress(`Casting ${items.length} variants... (this takes a while)`);
+      setCastProgress(`Casting ${items.length} variants... (this may take several minutes)`);
       await apiJson('/api/v1/tts/voices/cast', {
         method: 'POST',
         body: JSON.stringify({
@@ -260,19 +279,21 @@ export function CharacterPage() {
           format: 'wav',
         }),
       });
-      setCastProgress('Done! Reloading prompts...');
+      setCastProgress('Done!');
       loadPrompts();
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, 'Cast All');
     } finally {
       setCastingAll(false);
-      setCastProgress('');
+      setTimeout(() => setCastProgress(''), 3000);
     }
   };
 
-  const refinePreset = async (row: PresetRow) => {
-    if (!feedback.trim()) return;
+  const refinePreset = async (row: PresetRow, feedbackText?: string) => {
+    const fb = feedbackText || feedback;
+    if (!fb.trim()) return;
     setRefining(true);
+    setError(null);
     try {
       const result = await apiJson<RefineResult>('/api/v1/tts/voices/refine', {
         method: 'POST',
@@ -280,17 +301,16 @@ export function CharacterPage() {
           current_instruct: `${baseDesc}, ${row.instruct}`,
           base_description: baseDesc,
           ref_text: row.text,
-          feedback,
+          feedback: fb,
         }),
       });
       setRefineResult(result);
-      // Extract the emotion-specific part (strip base description prefix)
       const newInstruct = result.new_instruct.startsWith(baseDesc)
         ? result.new_instruct.slice(baseDesc.length).replace(/^,\s*/, '')
         : result.new_instruct;
       updatePreset(row.key, 'instruct', newInstruct);
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, 'LLM Refinement');
     } finally {
       setRefining(false);
     }
@@ -299,6 +319,7 @@ export function CharacterPage() {
   const playPrompt = async (promptName: string) => {
     setGenerating(promptName);
     setPreview(null);
+    setError(null);
     try {
       const result = await apiJson<DesignResult>('/api/v1/tts/synthesize', {
         method: 'POST',
@@ -306,7 +327,7 @@ export function CharacterPage() {
       });
       setPreview({ audio: result.audio, format: 'wav', label: promptName });
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, `Play "${promptName}"`);
     } finally {
       setGenerating(null);
     }
@@ -318,7 +339,7 @@ export function CharacterPage() {
       await apiJson(`/api/v1/tts/voices/prompts/${name}`, { method: 'DELETE' });
       setPrompts(prev => prev.filter(p => p.name !== name));
     } catch (e) {
-      alert((e as Error).message);
+      handleError(e, 'Delete prompt');
     }
   };
 
@@ -332,7 +353,6 @@ export function CharacterPage() {
     return true;
   });
 
-  // Group prompts by emotion for library view
   const promptGroups = new Map<string, VoicePrompt[]>();
   for (const p of prompts) {
     const key = p.emotion || 'other';
@@ -340,9 +360,7 @@ export function CharacterPage() {
     promptGroups.get(key)!.push(p);
   }
 
-  // Which presets have existing prompts?
   const existingPromptKeys = new Set(prompts.map(p => {
-    // Extract key from prompt name: "kira_happy_medium" → "happy_medium"
     const prefix = character.name.toLowerCase() + '_';
     return p.name.startsWith(prefix) ? p.name.slice(prefix.length) : p.name;
   }));
@@ -355,10 +373,20 @@ export function CharacterPage() {
         <h2>{character.name}</h2>
       </div>
 
+      {/* Connection Status */}
+      <ConnectionStatus />
+
+      {/* Error banner */}
+      {error && (
+        <div className="flash error" style={{ cursor: 'pointer' }} onClick={() => setError(null)}>
+          ⚠️ {error}
+        </div>
+      )}
+
       {/* Base Description */}
       <section className="base-section">
         <h3>Base Voice Description</h3>
-        <p className="hint">Physical traits only — pitch, texture, resonance, accent. No mood words.</p>
+        <p className="hint">Physical traits only — pitch, texture, resonance, accent. No mood/emotion words.</p>
         <textarea
           value={baseDesc}
           onChange={e => setBaseDesc(e.target.value)}
@@ -379,6 +407,13 @@ export function CharacterPage() {
         </section>
       )}
 
+      {/* Technical info toggle */}
+      <div className="technical-toggle">
+        <button onClick={() => setShowTechnical(!showTechnical)} className="btn-link" style={{ fontSize: 12 }}>
+          {showTechnical ? '🔧 Hide technical details' : '🔧 Show technical details'}
+        </button>
+      </div>
+
       {/* Tabs */}
       <div className="tab-bar">
         <button className={`tab ${tab === 'presets' ? 'active' : ''}`} onClick={() => setTab('presets')}>
@@ -392,21 +427,38 @@ export function CharacterPage() {
       {/* ── Presets Tab ──────────────────────────────────────── */}
       {tab === 'presets' && (
         <section className="presets-tab">
+          {/* Explanation */}
+          <div className="info-box">
+            <strong>What are presets?</strong> Presets define how a character expresses emotions (joy, anger, fear...)
+            and delivery modes (whispering, shouting, laughing...). Each preset has an instruction for the TTS model
+            and sample text. You can preview how they sound, edit them, then <strong>cast</strong> to save as reusable
+            voice prompts.
+          </div>
+
+          {showTechnical && (
+            <div className="info-box technical">
+              <strong>🔧 Technical:</strong> Preview uses <code>VoiceDesign</code> (generates a new voice from text description each time — results vary).
+              Casting uses <code>VoiceDesign → create_clone_prompt</code> (generates once, saves as a reusable tensor prompt for consistent reproduction).
+            </div>
+          )}
+
           <div className="presets-toolbar">
             <div className="filter-group">
               <button className={`btn-filter ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
               <button className={`btn-filter ${filter === 'emotions' ? 'active' : ''}`} onClick={() => setFilter('emotions')}>Emotions (18)</button>
               <button className={`btn-filter ${filter === 'modes' ? 'active' : ''}`} onClick={() => setFilter('modes')}>Modes (13)</button>
             </div>
-            <button onClick={castAll} disabled={castingAll} className="btn-primary">
-              {castingAll ? castProgress : '🎭 Cast All'}
-            </button>
+            <div className="toolbar-right">
+              <button onClick={castAll} disabled={castingAll} className="btn-primary" title="Generate and save all emotion/mode variants as clone prompts">
+                {castingAll ? castProgress : '🎭 Cast All Presets'}
+              </button>
+            </div>
           </div>
 
           <div className="preset-list">
             {filteredPresets.map(row => {
               const isExpanded = expanded === row.key;
-              const isGenerating = generating === row.key;
+              const isGenerating = generating === row.key || generating === row.key + '_cast';
               const hasPrompt = existingPromptKeys.has(row.key);
               const isRefining = refineKey === row.key;
 
@@ -418,25 +470,25 @@ export function CharacterPage() {
                       <span className={`preset-type ${row.type}`}>{row.type === 'emotion' ? '😊' : '🎤'}</span>
                       <strong>{row.name}</strong>
                       <span className={`badge intensity-${row.intensity}`}>{row.intensity}</span>
-                      {hasPrompt && <span className="badge cast">✓ cast</span>}
+                      {hasPrompt && <span className="badge cast" title="Already cast — clone prompt saved">✓ cast</span>}
                     </div>
-                    <div className="preset-summary">{row.instruct.slice(0, 80)}{row.instruct.length > 80 ? '...' : ''}</div>
+                    <div className="preset-summary">{row.instruct.slice(0, 60)}{row.instruct.length > 60 ? '...' : ''}</div>
                     <div className="preset-actions-compact">
                       <button
                         onClick={e => { e.stopPropagation(); previewPreset(row); }}
                         disabled={isGenerating}
                         className="btn-sm"
-                        title="Preview"
+                        title="Preview — generate a one-off sample (VoiceDesign, not saved)"
                       >
-                        {isGenerating ? '⏳' : '▶'}
+                        {isGenerating && generating === row.key ? '⏳' : '▶ Preview'}
                       </button>
                       <button
                         onClick={e => { e.stopPropagation(); castSingle(row); }}
                         disabled={isGenerating}
                         className="btn-sm btn-cast"
-                        title="Cast & save as clone prompt"
+                        title="Cast — generate and save as reusable clone prompt"
                       >
-                        💾
+                        {isGenerating && generating === row.key + '_cast' ? '⏳' : '💾 Cast'}
                       </button>
                       <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
                     </div>
@@ -446,7 +498,7 @@ export function CharacterPage() {
                   {isExpanded && (
                     <div className="preset-editor">
                       <div className="editor-field">
-                        <label>Instruct <span className="hint">(prepended with base description)</span></label>
+                        <label>Instruct <span className="hint">(emotion/delivery direction — prepended with base description)</span></label>
                         <textarea
                           value={row.instruct}
                           onChange={e => updatePreset(row.key, 'instruct', e.target.value)}
@@ -454,17 +506,21 @@ export function CharacterPage() {
                         />
                       </div>
                       <div className="editor-field">
-                        <label>Reference Text <span className="hint">(what to say in the casting clip)</span></label>
+                        <label>Sample Text <span className="hint">(what to say in the casting clip)</span></label>
                         <textarea
                           value={row.text}
                           onChange={e => updatePreset(row.key, 'text', e.target.value)}
                           rows={3}
                         />
                       </div>
-                      <div className="editor-field">
-                        <label className="hint">Full instruct sent to model:</label>
-                        <code className="full-instruct">{baseDesc}, {row.instruct}</code>
-                      </div>
+
+                      {showTechnical && (
+                        <div className="editor-field">
+                          <label className="hint">Full instruct sent to VoiceDesign model:</label>
+                          <code className="full-instruct">{baseDesc}, {row.instruct}</code>
+                        </div>
+                      )}
+
                       <div className="editor-actions">
                         <button onClick={() => previewPreset(row)} disabled={!!generating} className="btn-primary btn-sm">
                           {generating === row.key ? '⏳ Generating...' : '🔊 Preview'}
@@ -477,25 +533,38 @@ export function CharacterPage() {
                           onClick={() => { setRefineKey(isRefining ? null : row.key); setRefineResult(null); setFeedback(''); }}
                           className="btn-sm"
                         >
-                          {isRefining ? '✕ Close' : '✨ Refine with LLM'}
+                          {isRefining ? '✕ Close' : '✨ Refine with AI'}
                         </button>
                       </div>
 
                       {/* LLM Refine inline */}
                       {isRefining && (
                         <div className="refine-inline">
+                          <p className="hint" style={{ marginBottom: 8 }}>Quick feedback — click a button or type your own:</p>
+                          <div className="quick-feedback-grid">
+                            {QUICK_FEEDBACK.map(fb => (
+                              <button
+                                key={fb}
+                                onClick={() => refinePreset(row, fb)}
+                                disabled={refining}
+                                className="btn-sm btn-quick-feedback"
+                              >
+                                {fb}
+                              </button>
+                            ))}
+                          </div>
                           <textarea
-                            placeholder="What's wrong? (e.g., 'too nasal', 'not angry enough', 'pitch drifts')"
+                            placeholder="Or describe what's wrong in your own words..."
                             value={feedback}
                             onChange={e => setFeedback(e.target.value)}
                             rows={2}
                           />
-                          <button onClick={() => refinePreset(row)} disabled={refining} className="btn-primary btn-sm">
+                          <button onClick={() => refinePreset(row)} disabled={refining || !feedback.trim()} className="btn-primary btn-sm">
                             {refining ? '🤔 Thinking...' : '✨ Refine'}
                           </button>
                           {refineResult && (
                             <div className="refine-result">
-                              <p><strong>Explanation:</strong> {refineResult.explanation}</p>
+                              <p><strong>Changes:</strong> {refineResult.explanation}</p>
                               <p className="hint">Instruct updated above. Preview to hear the change.</p>
                             </div>
                           )}
@@ -513,6 +582,18 @@ export function CharacterPage() {
       {/* ── Voice Library Tab ────────────────────────────────── */}
       {tab === 'library' && (
         <section className="library-tab">
+          <div className="info-box">
+            <strong>Voice Library</strong> contains saved clone prompts — reusable voice snapshots that produce
+            consistent output every time. Use these for production rendering.
+          </div>
+
+          {showTechnical && (
+            <div className="info-box technical">
+              <strong>🔧 Technical:</strong> Play uses <code>synthesize_with_clone_prompt</code> (consistent voice from saved tensor prompt).
+              Delete removes the <code>.pt</code> file from the GPU server.
+            </div>
+          )}
+
           {prompts.length === 0 ? (
             <p className="empty">No clone prompts yet. Use the Presets tab to cast voices.</p>
           ) : (
@@ -533,10 +614,13 @@ export function CharacterPage() {
                           onClick={() => playPrompt(p.name)}
                           disabled={generating === p.name}
                           className="btn-sm"
+                          title="Synthesize test text using this clone prompt"
                         >
                           {generating === p.name ? '⏳' : '▶ Play'}
                         </button>
-                        <button onClick={() => deletePrompt(p.name)} className="btn-sm btn-danger">🗑</button>
+                        <button onClick={() => deletePrompt(p.name)} className="btn-sm btn-danger" title="Delete this clone prompt">
+                          🗑
+                        </button>
                       </div>
                     </div>
                   ))}

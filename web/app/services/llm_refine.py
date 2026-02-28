@@ -63,11 +63,29 @@ async def refine_prompt(
     """
     import json
 
+    # Sanitize inputs — strip potential prompt injection patterns
+    def sanitize(s: str, max_len: int = 500) -> str:
+        """Remove common injection patterns and limit length."""
+        s = s[:max_len]
+        # Strip sequences that look like system/role overrides
+        for pattern in [
+            "ignore previous instructions",
+            "ignore all instructions",
+            "you are now",
+            "system:",
+            "assistant:",
+            "<<SYS>>",
+            "[INST]",
+            "</s>",
+        ]:
+            s = s.replace(pattern, "").replace(pattern.upper(), "")
+        return s.strip()
+
     user_msg = USER_TEMPLATE.format(
-        current_instruct=current_instruct,
-        base_description=base_description,
-        ref_text=ref_text,
-        feedback=feedback,
+        current_instruct=sanitize(current_instruct, 1000),
+        base_description=sanitize(base_description, 500),
+        ref_text=sanitize(ref_text, 500),
+        feedback=sanitize(feedback, 500),
     )
 
     if settings.llm_provider == "anthropic":

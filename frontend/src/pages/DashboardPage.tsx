@@ -1,20 +1,20 @@
-/** Dashboard — list characters, create new, show TTS status. */
+/** Dashboard — list characters, create new, show TTS connection status. */
 
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiJson } from '../api/client';
-import type { Character, TTSStatus } from '../api/types';
+import { ConnectionStatus } from '../components/ConnectionStatus';
+import type { Character } from '../api/types';
 
 export function DashboardPage() {
   const [characters, setCharacters] = useState<Character[]>([]);
-  const [status, setStatus] = useState<TTSStatus | null>(null);
   const [name, setName] = useState('');
   const [desc, setDesc] = useState('');
   const [creating, setCreating] = useState(false);
   const [showForm, setShowForm] = useState(false);
+
   useEffect(() => {
     apiJson<Character[]>('/api/v1/characters').then(setCharacters).catch(() => {});
-    apiJson<TTSStatus>('/api/v1/tts/status').then(setStatus).catch(() => {});
   }, []);
 
   const createCharacter = async () => {
@@ -38,16 +38,10 @@ export function DashboardPage() {
 
   return (
     <div className="dashboard">
-      <div className="status-bar">
-        <h2>Voice Studio</h2>
-        {status && (
-          <div className="status-info">
-            <span className={`dot ${status.tunnel_connected ? 'green' : 'red'}`} />
-            GPU {status.tunnel_connected ? 'Connected' : 'Disconnected'}
-            {status.tunnel_connected && ` · ${status.models_loaded.join(', ')} · ${status.prompts_count} prompts`}
-          </div>
-        )}
-      </div>
+      <h2>Voice Studio</h2>
+
+      {/* Connection Status */}
+      <ConnectionStatus />
 
       <section className="characters-section">
         <div className="section-header">
