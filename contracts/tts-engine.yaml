@@ -1,0 +1,52 @@
+version: "1.0"
+component: tts-engine
+maturity: mvp
+description: Core TTS synthesis engine wrapping Qwen3-TTS models.
+
+interface:
+  generate_voice_design:
+    description: Synthesize speech using VoiceDesign model with text description.
+    args:
+      text: str (required) — text to synthesize
+      description: str (required) — voice description (pitch, texture, accent)
+      language: str (default "Auto")
+    returns: tuple[numpy.ndarray, int] — (wav_array, sample_rate)
+
+  generate_voice_clone:
+    description: Synthesize speech using Base model with reference audio.
+    args:
+      text: str (required) — text to synthesize
+      ref_audio_path: str (required) — path to reference WAV
+      ref_text: str (optional) — transcript of reference audio
+      language: str (default "Auto")
+    returns: tuple[numpy.ndarray, int] — (wav_array, sample_rate)
+
+  create_clone_prompt:
+    description: Create a reusable clone prompt from reference audio.
+    args:
+      ref_audio_b64: str (required) — base64-encoded reference audio
+      name: str (required) — prompt name
+      ref_text: str (optional) — transcript
+      metadata: dict (optional) — rich metadata fields
+    returns: VoiceClonePromptItem
+
+  synthesize_with_clone_prompt:
+    description: Synthesize speech using a saved clone prompt.
+    args:
+      text: str (required) — text to synthesize
+      prompt_item: VoiceClonePromptItem (required)
+      language: str (default "Auto")
+    returns: tuple[numpy.ndarray, int] — (wav_array, sample_rate)
+
+  load_models:
+    description: Load enabled models (voice_design, base).
+    args: none
+    returns: none
+
+nfr:
+  latency_p99_ms: 30000  # typical sentence
+  gpu_memory_mb: 4000  # per model in bfloat16
+
+dependencies: []
+owned_by: tts-engine
+consumers: [relay, runpod-handler]

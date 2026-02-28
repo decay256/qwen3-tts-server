@@ -1,0 +1,83 @@
+version: "1.0"
+component: relay
+maturity: mvp
+description: REST API relay that routes TTS requests to GPU backends.
+
+endpoints:
+  GET /api/v1/status:
+    description: Relay health and tunnel status.
+    auth: required (Bearer token)
+    response:
+      200: { relay: string, tunnel_connected: bool, connected_clients: int, uptime_seconds: float }
+
+  POST /api/v1/voices/design:
+    description: Generate speech with VoiceDesign model.
+    auth: required
+    request:
+      text: string (required)
+      instruct: string (required) — voice description
+      language: string (default "English")
+    response:
+      200: audio/wav binary (X-Duration-Seconds header)
+      502: { error: string } — backend failure
+      503: { error: string } — no backend available
+
+  POST /api/v1/voices/clone-prompt:
+    description: Create a clone prompt from reference audio.
+    auth: required
+    request:
+      audio: string (base64, required)
+      name: string (required)
+      ref_text: string (optional)
+    response:
+      200: { name: string, status: string }
+
+  POST /api/v1/tts/clone-prompt:
+    description: Synthesize with a saved clone prompt.
+    auth: required
+    request:
+      voice_prompt: string (required) — prompt name
+      text: string (required)
+      language: string (default "Auto")
+    response:
+      200: audio/wav binary
+
+  POST /api/v1/voices/design/batch:
+    description: Batch voice design synthesis.
+    auth: required
+    request:
+      items: array of { name, text, instruct, language? }
+    response:
+      200: { results: array }
+
+  POST /api/v1/voices/cast:
+    description: Generate full emotion matrix for a voice.
+    auth: required
+    request:
+      base_description: string
+      character: string
+      text: string (optional)
+    response:
+      200: { results: array of 31 clips }
+
+  GET /api/v1/voices/prompts:
+    description: List saved clone prompts.
+    auth: required
+    note: Requires tunnel (prompts stored on GPU machine)
+
+  GET /api/v1/voices/characters:
+    description: List characters with prompts.
+    auth: required
+    note: Requires tunnel
+
+  GET /api/v1/voices/emotions:
+    description: List emotion and mode presets.
+    auth: required
+
+nfr:
+  availability: "99.9%"
+  auth_required: true
+
+dependencies: [tts-engine, runpod-client]
+owned_by: relay
+consumers: [web-backend, external-clients]
