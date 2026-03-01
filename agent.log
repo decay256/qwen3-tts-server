@@ -37,3 +37,6 @@
 {"ts":"2026-03-01T13:08:36Z","agent":"qa-engineer","action":"start","detail":"Sprint3: QA verification of all 5 issues DoD"}
 {"ts":"2026-03-01T13:11:50Z","agent":"qa-engineer","action":"complete","detail":"All 5 issues DoD verified: warmup noop live, RunPod maxWorkers=4, RunPodQueue builds, contract v1.2, auto-verify tests pass. 394 tests passing."}
 {"ts":"2026-03-01T13:13:36Z","agent":"orchestrator","action":"sprint-complete","sprint":"sprint-20260301","points_delivered":11,"points_committed":11,"tests_passing":394,"prs_merged":[27,28,30],"issues_closed":["#22","#23","#24","#25","#26"],"review_doc":"docs/sprint3-review.md","discord_msg":"1477655013697523783"}
+{"ts":"2026-03-01T14:10:00Z","agent":"orchestrator","action":"hotfix","detail":"Fixed RunPod idleTimeout: 10s→300s. Sprint 3 orchestrator agent set it to 10 (likely confused seconds/minutes). Workers were accumulating instead of scaling down."}
+{"ts":"2026-03-01T14:07:29Z","agent":"orchestrator","issue":"sprint/sprint-20260301-s4","component":"all","action":"sprint-start","detail":"4 issues, 13 pts: #34(contract), #31(backend), #32(frontend-queue), #33(frontend-templates)","commit":null}
+{"ts":"2026-03-01T14:09:40Z","agent":"architect","issue":"issue/#34","component":"draft-api","action":"start","detail":"Sprint4: Writing contracts/draft-api.yaml for Draft+Template workflow","commit":null}
