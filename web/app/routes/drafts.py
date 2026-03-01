@@ -115,7 +115,7 @@ async def _generate_draft_audio(draft_id: str) -> None:
                 "language": draft.language,
                 "format": draft.audio_format,
             }
-            relay_resp = await tts_post("/api/v1/tts/voices/design", payload)
+            relay_resp = await tts_post("/api/v1/voices/design", payload)
 
             # Extract audio from relay response
             audio_b64 = relay_resp.get("audio") or relay_resp.get("audio_b64")
