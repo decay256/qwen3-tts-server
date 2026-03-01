@@ -54,16 +54,19 @@ flowchart LR
 
 ## Active Sprint
 
-**Sprint 3: Worker Management & Queue Visibility** (2026-03-01)
-- **Milestone:** sprint-20260301 (#3)
-- **Goal:** Warmup idempotent → autoscaler capped at 4 → queue page → busy state
-- **Issues:** #22 (warmup), #23 (autoscaler+queue), #24 (contract), #25 (busy state), #26 (auto-verify)
-- **Points:** 11
-- **Phase:** KICKOFF complete → running ARCHITECT → BUILD
+**No active sprint** — Sprint 3 completed 2026-03-01. Awaiting PO to propose Sprint 4 backlog.
 
 ---
 
 ## Completed Sprints
+
+### Sprint 3: Worker Management & Queue Visibility (2026-03-01) ✅ DONE
+- **Goal:** Warmup idempotent → autoscaler capped at 4 workers → queue visibility → busy state
+- **DoD:** Warmup noop live · RunPod maxWorkers=4 · RunPodQueue panel renders · Busy state blue · Auto-verify in dev
+- **Proposal:** `docs/sprint3-proposal.md`
+- **Review:** `docs/sprint3-review.md`
+- **Issues:** #22 ✅, #23 ✅, #24 ✅, #25 ✅, #26 ✅ (11 points — 100%)
+- **PRs merged:** #27 (contracts v1.2), #28 (backend), #30 (frontend+devops)
 
 ### Sprint 2: Fix RunPod Status & Connection UX (2026-03-01) ✅ DONE
 - **Goal:** Accurate GPU status display + working warmup + verified audio playback
