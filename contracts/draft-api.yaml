@@ -1,6 +1,6 @@
 # contracts/draft-api.yaml
-# Sprint 4 — Draft Workflow & Character Templates
-version: "1.0"
+# Sprint 5 — Draft-Centric UX Overhaul (updated from Sprint 4 baseline)
+version: "1.1"
 component: draft-service
 maturity: mvp
 nfr:
@@ -39,6 +39,44 @@ nfr:
 #    It does NOT automatically create a GPU-side clone prompt in Sprint 4.
 #    Clone-prompt creation on approve is deferred to Sprint 5 to avoid
 #    GPU side-effects during the approval flow.
+#
+# ── Sprint 5 Design Decisions ─────────────────────────────────────────────────
+#
+# 5. PRESET ACTIONS — draft-centric simplification
+#    Preview, Cast & Save, Override & Save, and Reset buttons are REMOVED from
+#    preset rows. The ONLY action on a preset row is the "📝 Draft" button.
+#    Rationale: The draft → review → approve → template flow makes ad-hoc
+#    preview/cast redundant. Simplifies the UI significantly.
+#
+# 6. DRAFT LIST AS QUEUE — immediate feedback
+#    Clicking Draft MUST immediately show a new entry in the draft list with
+#    status=pending. Each click creates a NEW draft (never overwrites).
+#    Draft list auto-loads on page open — not deferred to tab switch.
+#    Polling interval is 3 seconds (down from 30s/60s in Sprint 4).
+#
+# 7. RETRY BUTTON ON FAILED DRAFTS
+#    Failed drafts show a "Retry" button that calls POST /api/v1/drafts/{id}/regenerate.
+#    The original failed draft remains; regenerate creates a new pending draft.
+#    Contract: see POST /api/v1/drafts/{draft_id}/regenerate (already in v1.0).
+#
+# 8. CONNECTION STATUS IN NAVBAR
+#    ConnectionStatus component is moved to the Layout navbar (below menu),
+#    visible on every page. Poll interval reduced to 3s (from 30s/60s).
+#    Queue counter (pending/generating drafts) refreshes on all navigation.
+#
+# 9. VOICE LIBRARY TAB REMOVAL
+#    Voice Library tab is removed. The Templates tab replaces it as the
+#    canonical voice management surface. Associated state/code is cleaned up.
+#
+# 10. 405 ROUTING FIX — FastAPI + Vite
+#     Root cause: SPA fallback handler (@app.get("/{path:path}")) creates a
+#     GET-only catch-all that returns 405 for POST to paths with trailing slash.
+#     Fix A (backend): Add `redirect_slashes=False` to FastAPI app factory
+#             OR ensure no trailing slash is ever sent by the frontend.
+#     Fix B (frontend): Add Vite proxy config in vite.config.ts for dev mode
+#             so requests to port 5173 are forwarded to port 8080.
+#     Current production code is correct (no trailing slash in generateDraft).
+#     Dev-mode proxy is the priority fix to prevent future confusion.
 #
 # ─────────────────────────────────────────────────────────────────────────────
 
