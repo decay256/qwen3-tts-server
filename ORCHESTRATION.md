@@ -52,6 +52,15 @@ flowchart LR
     style Product fill:#008000,color:#fff
 ```
 
+## Active Sprint
+
+**Sprint 1: RunPod Preview Rendering**
+- **Goal:** User can run a preview rendering for a character from the frontend
+- **DoD:** Open character page → click Preview → hear audio (even on RunPod cold start)
+- **Proposal:** `docs/sprint1-proposal.md`
+- **Issues:** #10, #11, #12, #13 (13 points)
+- **Status:** #10 ✅, #11 ✅, #12 ✅ (fix pushed), #13 ⬜ (QA not yet run)
+
 ## Component Status
 
 | Component | Maturity | Owner | Status |
@@ -99,11 +108,13 @@ Every sprint follows this exact sequence. No step may be skipped:
 ### Pre-Flight Checklist (Orchestrator reads this every session)
 
 Before spawning ANY agent:
-- [ ] Read `ORCHESTRATION.md` (this file)
+- [ ] Read `ORCHESTRATION.md` (this file) — check "Active Sprint" section
+- [ ] Read `docs/sprint-N-proposal.md` for current sprint goal + DoD
 - [ ] Read `agent.log` tail for recent context
 - [ ] Identify which sprint phases are complete vs remaining
 - [ ] Plan the full agent sequence before starting
 - [ ] Do NOT skip phases because the task "feels simple"
+- [ ] Sprint proposals MUST be persisted to `docs/sprint-N-proposal.md` — chat-only proposals get lost on compaction
 
 ### Anti-Patterns (things that have gone wrong before)
 
@@ -113,3 +124,4 @@ Before spawning ANY agent:
 | "I'll review it myself" | Self-merged PRs with bugs | Rule 2: Code Reviewer agent required |
 | "Sprint review later" | Never written, context lost | Rule 7: Sprint review mandatory |
 | "Just one agent is enough" | Skipped reviewer, QA | Strict sequence: all phases run |
+| "Sprint goal in chat only" | Context compaction wiped it, orchestrator forgot the goal | Pre-flight: read `docs/sprint-N-proposal.md` |
