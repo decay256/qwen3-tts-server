@@ -150,16 +150,16 @@ export function ConnectionStatus() {
   // Initial fetch on mount
   useEffect(() => { checkStatus(); }, [checkStatus]);
 
-  // Derive current info so we can compute the right poll interval
+  // Derive current info
   const info = parseStatus(ttsStatus, fetchError ?? undefined);
-  // 30s when not healthy, 60s when connected
-  const pollInterval = info.status === 'connected' ? 60_000 : 30_000;
+  // Sprint 5: poll every 3s on all status (was adaptive 30s/60s)
+  const POLL_INTERVAL_MS = 3_000;
 
-  // Adaptive polling — recreated whenever interval changes
+  // Polling — 3s constant
   useEffect(() => {
-    const id = setInterval(checkStatus, pollInterval);
+    const id = setInterval(checkStatus, POLL_INTERVAL_MS);
     return () => clearInterval(id);
-  }, [checkStatus, pollInterval]);
+  }, [checkStatus]);
 
   // Flash banner on status transition (disconnected→connected etc.)
   useEffect(() => {
