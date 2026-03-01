@@ -1,54 +1,148 @@
-version: "1.0"
+version: "1.1"
 component: relay
 maturity: mvp
-description: REST API relay that routes TTS requests to GPU backends.
+description: REST API relay that routes TTS requests to GPU backends (local tunnel or RunPod fallback).
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+schemas:
+  RunPodHealth:
+    description: >
+      Raw response from the RunPod /health endpoint. Returned as `runpod_health`
+      in status responses when RunPod is configured. Based on RunPod serverless
+      health API v2.
+    fields:
+      workers:
+        ready: "int — workers currently ready to accept jobs"
+        idle: "int — workers warmed up but not yet assigned a job"
+        initializing: "int — workers starting up (cold-start in progress)"
+        running: "int — workers actively executing a job"
+        throttled: "int — workers throttled by RunPod platform"
+        unhealthy: "int — workers in an unhealthy state"
+      jobs:
+        queued: "int — jobs waiting for a worker"
+        inProgress: "int — jobs currently being executed"
+        completed: "int — jobs completed successfully"
+        failed: "int — jobs that failed"
+        retried: "int — jobs that were retried"
+        badfailed: "int — jobs that failed and cannot be retried"
+
+  TTSStatus:
+    description: >
+      Combined status response returned by GET /api/v1/tts/status. This is the
+      canonical type for the frontend. All fields guaranteed present except
+      runpod_health (absent when RunPod is not configured) and error/local_error
+      (absent when there is no error).
+    fields:
+      status: "string — always 'ok' on success"
+      tunnel_connected: "bool — true when the GPU machine tunnel is active"
+      runpod_configured: "bool — true when RunPod env vars are set on the relay"
+      runpod_available: "bool — true when at least one RunPod worker is ready/idle/initializing/running"
+      models_loaded: "list[string] — models loaded on the local GPU (empty when tunnel is down)"
+      prompts_count: "int — number of saved clone prompts on the GPU (0 when tunnel is down)"
+      runpod_health: "RunPodHealth (optional) — omitted when runpod_configured is false"
+      local_error: "string (optional) — set when tunnel is connected but local status call failed"
+      error: "string (optional) — set by the web proxy error handler, not the relay itself"
+
+# ── Endpoints ─────────────────────────────────────────────────────────────────
 
 endpoints:
   GET /api/v1/status:
-    description: Relay health and tunnel status.
+    description: >
+      Relay health and tunnel status. Low-level relay introspection endpoint.
+      Prefer GET /api/v1/tts/status for frontend polling.
     auth: required (Bearer token)
     response:
-      200: { relay: string, tunnel_connected: bool, connected_clients: int, uptime_seconds: float }
+      200:
+        relay: "string — always 'ok'"
+        tunnel_connected: "bool"
+        connected_clients: "int"
+        uptime_seconds: "float"
+        runpod_configured: "bool"
+        runpod_available: "bool"
+        runpod_health: "RunPodHealth (optional) — omitted when not configured"
+        local: "object (optional) — local GPU /api/v1/status response, present when tunnel is connected"
+
+  GET /api/v1/tts/status:
+    description: >
+      Combined status endpoint designed for the web frontend. Returns a flat,
+      merged view of tunnel status, RunPod availability, and local GPU info
+      (models_loaded, prompts_count) when the tunnel is connected.
+      Added Sprint 1. Preferred over GET /api/v1/status for frontend polling.
+    auth: required (Bearer token)
+    response:
+      200: TTSStatus
+
+  POST /api/v1/tts/warmup:
+    description: >
+      Trigger RunPod worker scale-up (fire-and-forget). Submits a minimal job
+      to RunPod to cause a worker to initialise. Returns immediately.
+      Callers should poll GET /api/v1/tts/status to track readiness.
+      Added Sprint 1.
+    auth: required (Bearer token)
+    request: "{} (empty body)"
+    response:
+      200 (already connected):
+        status: "connected"
+        message: "string — 'GPU tunnel is already connected'"
+      200 (warming):
+        status: "warming"
+        message: "string — 'RunPod worker requested'"
+      502:
+        error: "string — RunPod job submission failed"
+      503:
+        error: "string — RunPod not configured"
 
   POST /api/v1/voices/design:
     description: Generate speech with VoiceDesign model.
     auth: required
     request:
-      text: string (required)
-      instruct: string (required) — voice description
-      language: string (default "English")
+      text: "string (required) — text to synthesise"
+      instruct: "string (required) — voice description / delivery instruction"
+      language: "string (default 'English')"
+      format: "string (default 'wav')"
+      create_prompt: "bool (optional) — if true, saves the generated audio as a clone prompt on the GPU"
+      prompt_name: "string (optional) — name for the saved clone prompt; required when create_prompt=true"
+      tags: "list[string] (optional) — tags applied to the saved prompt"
     response:
-      200: audio/wav binary (X-Duration-Seconds header)
-      502: { error: string } — backend failure
-      503: { error: string } — no backend available
+      200: "audio/wav binary (X-Duration-Seconds header)"
+      502: "{ error: string } — backend failure"
+      503: "{ error: string } — no backend available"
 
   POST /api/v1/voices/clone-prompt:
     description: Create a clone prompt from reference audio.
     auth: required
     request:
-      audio: string (base64, required)
-      name: string (required)
-      ref_text: string (optional)
+      audio: "string (base64, required)"
+      name: "string (required)"
+      ref_text: "string (optional)"
+      tags: "list[string] (optional)"
     response:
-      200: { name: string, status: string }
+      200:
+        name: string
+        status: string
 
   POST /api/v1/tts/clone-prompt:
     description: Synthesize with a saved clone prompt.
     auth: required
     request:
-      voice_prompt: string (required) — prompt name
-      text: string (required)
-      language: string (default "Auto")
+      voice_prompt: "string (required) — prompt name"
+      text: "string (required)"
+      language: "string (default 'Auto')"
     response:
-      200: audio/wav binary
+      200: "audio/wav binary"
 
   POST /api/v1/voices/design/batch:
     description: Batch voice design synthesis.
     auth: required
     request:
-      items: array of { name, text, instruct, language? }
+      items: "array of { name, text, instruct, language?, tags?, character?, emotion?, intensity?, description?, base_description? }"
+      format: "string (default 'wav')"
+      create_prompts: "bool (default false) — save generated audio as clone prompts"
+      tags_prefix: "list[string] (optional) — tags applied to all saved prompts"
     response:
-      200: { results: array }
+      200:
+        results: array
 
   POST /api/v1/voices/cast:
     description: Generate full emotion matrix for a voice.
@@ -56,9 +150,10 @@ endpoints:
     request:
       base_description: string
       character: string
-      text: string (optional)
+      text: "string (optional)"
     response:
-      200: { results: array of 31 clips }
+      200:
+        results: "array of up to 31 clips"
 
   GET /api/v1/voices/prompts:
     description: List saved clone prompts.
@@ -74,10 +169,27 @@ endpoints:
     description: List emotion and mode presets.
     auth: required
 
+# ── NFRs ──────────────────────────────────────────────────────────────────────
+
 nfr:
   availability: "99.9%"
   auth_required: true
+  status_timeout: "5s (RunPod health check hard timeout in _get_runpod_status)"
 
 dependencies: [tts-engine, runpod-client]
 owned_by: relay
 consumers: [web-backend, external-clients]
+
+# ── Changelog ─────────────────────────────────────────────────────────────────
+
+changelog:
+  "1.1":
+    - "Added GET /api/v1/tts/status (Sprint 1 — issue #18)"
+    - "Added POST /api/v1/tts/warmup (Sprint 1 — issue #18)"
+    - "Updated GET /api/v1/status with runpod_configured, runpod_available, runpod_health fields"
+    - "Updated POST /api/v1/voices/design: added optional create_prompt, prompt_name, tags"
+    - "Added RunPodHealth schema with full workers and jobs sub-objects"
+    - "Added TTSStatus schema (canonical frontend type)"
+    - "Documented batch design create_prompts and tags_prefix fields"
+  "1.0":
+    - "Initial contract"
