@@ -289,6 +289,85 @@ class RemoteRelay:
             logger.exception("Error forwarding request")
             return web.json_response({"error": str(e)}, status=500)
 
+    async def _gcs_push_after_create(self, prompt_name: str, request_body: dict) -> None:
+        """Upload a newly-created clone prompt .pt file to GCS.
+
+        Called (fire-and-forget) after a successful clone-prompt creation via
+        the tunnel.  Downloads the .pt bytes from the local GPU server using a
+        dedicated download endpoint, saves to a temp file, then pushes to GCS.
+
+        Best-effort: logs warnings on failure but never raises (so the original
+        HTTP response is not affected).
+
+        Args:
+            prompt_name: The prompt name returned by the local server.
+            request_body: The original creation request body (for metadata).
+        """
+        if self.prompt_sync is None:
+            logger.debug("GCS push skipped: no prompt_sync configured")
+            return
+
+        import tempfile
+
+        try:
+            # Try to download the .pt bytes via the tunnel's download endpoint.
+            # The local TTS server should expose this; if not, we log and exit.
+            download_path = f"/api/v1/voices/prompts/{prompt_name}/download"
+            response = await self.tunnel_server.send_request("GET", download_path, timeout=30)
+
+            if response.status_code != 200:
+                logger.warning(
+                    "GCS push: download endpoint returned %d for prompt '%s' — "
+                    "skipping GCS upload (local server may not support prompt download yet)",
+                    response.status_code, prompt_name,
+                )
+                return
+
+            # Decode the .pt bytes from the response
+            try:
+                data = json.loads(response.body or "{}")
+                pt_b64 = data.get("pt_b64") or data.get("prompt_b64") or data.get("data")
+                if not pt_b64:
+                    logger.warning(
+                        "GCS push: download response for '%s' has no pt_b64/prompt_b64/data field — "
+                        "skipping GCS upload",
+                        prompt_name,
+                    )
+                    return
+                import base64 as _base64
+                pt_bytes = _base64.b64decode(pt_b64)
+            except Exception as exc:
+                logger.warning("GCS push: failed to parse download response for '%s': %s", prompt_name, exc)
+                return
+
+            # Write to temp file and push to GCS
+            with tempfile.NamedTemporaryFile(suffix=".pt", delete=False) as tmp:
+                tmp.write(pt_bytes)
+                tmp_path = tmp.name
+
+            try:
+                metadata = PromptGCSMetadata(
+                    character=request_body.get("character"),
+                    description=request_body.get("description"),
+                    tags=request_body.get("tags", []),
+                    source_backend="tunnel",
+                    source_backend_type="tunnel",
+                    ref_text=request_body.get("ref_text"),
+                )
+                result = self.prompt_sync.push(prompt_name, tmp_path, metadata=metadata)
+                logger.info(
+                    "GCS push: uploaded prompt '%s' → %s (%d bytes)",
+                    prompt_name, result.gcs_path, result.size_bytes,
+                )
+                debug_event("gcs_push_success", prompt_id=prompt_name, gcs_path=result.gcs_path)
+            finally:
+                import os as _os
+                _os.unlink(tmp_path)
+
+        except Exception as exc:
+            logger.warning("GCS push failed for prompt '%s' (best-effort): %s", prompt_name, exc)
+            debug_event("gcs_push_failed", prompt_id=prompt_name, error=str(exc))
+
     # --- Route handlers ---
 
     async def _get_runpod_status(self) -> tuple[bool, dict | None]:
@@ -728,15 +807,38 @@ class RemoteRelay:
         return await self._forward_with_fallback("POST", "/api/v1/voices/design", body=body)
 
     async def handle_create_clone_prompt(self, request: web.Request) -> web.Response:
-        """POST /api/v1/voices/clone-prompt — create persistent clone prompt."""
+        """POST /api/v1/voices/clone-prompt — create persistent clone prompt.
+
+        After successful tunnel creation, asynchronously uploads the .pt file to
+        GCS so that RunPod and other backends can retrieve it later.
+        """
         auth_error = await self._require_auth(request)
         if auth_error:
             return auth_error
         tunnel_error = await self._require_tunnel()
         if tunnel_error:
             return tunnel_error
-        body = await request.text()
-        return await self._forward_with_fallback("POST", "/api/v1/voices/clone-prompt", body=body)
+
+        body_text = await request.text()
+        response = await self._forward_with_fallback("POST", "/api/v1/voices/clone-prompt", body=body_text)
+
+        # Fire-and-forget GCS push on success (2xx from tunnel only)
+        if response.status >= 200 and response.status < 300 and self.tunnel_server.has_client:
+            try:
+                resp_data = json.loads(response.text)
+                prompt_name = resp_data.get("name") or resp_data.get("prompt_id")
+                if prompt_name and self.prompt_sync:
+                    # Async upload — doesn't block the HTTP response
+                    try:
+                        req_body = json.loads(body_text) if body_text else {}
+                    except json.JSONDecodeError:
+                        req_body = {}
+                    asyncio.ensure_future(self._gcs_push_after_create(prompt_name, req_body))
+                    logger.info("GCS push scheduled for new clone prompt '%s'", prompt_name)
+            except Exception as exc:
+                logger.warning("GCS push scheduling failed (non-fatal): %s", exc)
+
+        return response
 
     async def handle_list_prompts(self, request: web.Request) -> web.Response:
         """GET /api/v1/voices/prompts — list saved clone prompts."""
