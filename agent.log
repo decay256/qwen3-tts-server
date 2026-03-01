@@ -27,3 +27,5 @@
 {"ts":"2026-03-01T12:50:05Z","agent":"orchestrator","issue":"sprint/sprint-20260301","component":"all","action":"sprint-start","detail":"5 issues, 11 pts: #22(warmup idempotency), #23(autoscaler+queue), #24(contract fix), #25(busy state), #26(auto-verify)","commit":null}
 {"ts":"2026-03-01T12:54:29Z","agent":"architect","action":"start","issue":"#24","detail":"Sprint3: Fix RunPodHealth error variant in contract + review #23 contract needs"}
 {"ts":"2026-03-01T12:55:17Z","agent":"architect","action":"complete","issue":"#24","pr":27,"detail":"relay-api.yaml v1.2: RunPodHealth error variant documented, warmup noop response added, autoscaler notes added"}
+{"ts":"2026-03-01T13:01:41Z","agent":"frontend-engineer","action":"complete","issue":"#25","pr":29,"detail":"RunPod Busy state: blue indicator, no warmup button, shows queue count"}
+{"ts":"2026-03-01T13:01:41Z","agent":"devops","action":"start","issue":"#23","detail":"Sprint3: RunPod autoscaler config (maxWorkers=4) + queue visibility"}
