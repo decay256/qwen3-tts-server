@@ -1,5 +1,25 @@
 /** Shared API types. */
 
+/** Raw response from the RunPod /health endpoint. */
+export interface RunPodHealth {
+  workers: {
+    ready: number;
+    idle: number;
+    initializing: number;
+    running: number;
+    throttled: number;
+    unhealthy: number;
+  };
+  jobs: {
+    queued: number;
+    inProgress: number;
+    completed: number;
+    failed: number;
+    retried: number;
+    badfailed: number;
+  };
+}
+
 export interface Character {
   id: string;
   name: string;
@@ -28,7 +48,7 @@ export interface TTSStatus {
   prompts_count: number;
   runpod_configured?: boolean;
   runpod_available?: boolean;
-  runpod_health?: unknown;
+  runpod_health?: RunPodHealth;
   error?: string;
   local_error?: string;
 }
@@ -65,11 +85,6 @@ export interface RefineResult {
   explanation: string;
 }
 
-/** Connection status with details */
-export interface ConnectionInfo {
-  gpu_tunnel: boolean;
-  runpod: 'ready' | 'cold' | 'unavailable' | 'unknown';
-  active_backend: 'tunnel' | 'runpod' | 'none';
-  error?: string;
-  runpod_workers?: { ready: number; idle: number; initializing: number };
-}
+// NOTE: ConnectionInfo was removed — it was dead code that conflicted with
+// the local ConnectionInfo defined in ConnectionStatus.tsx (different shape).
+// See issue #17 / findings-issue-18-contract-gaps.md §3.

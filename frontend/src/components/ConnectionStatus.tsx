@@ -29,18 +29,43 @@ function parseStatus(s: TTSStatus | null, err?: string): ConnectionInfo {
   }
 
   if (s.runpod_configured) {
-    if (s.runpod_available) {
+    const w = s.runpod_health?.workers;
+
+    if (w && (w.idle > 0 || w.ready > 0)) {
+      const readyCount = w.idle + w.ready;
+      const inQueue = s.runpod_health?.jobs?.queued ?? 0;
+      return {
+        status: 'connected',
+        label: 'RunPod Ready',
+        detail: `${readyCount} worker${readyCount !== 1 ? 's' : ''} ready · ${inQueue} in queue`,
+        canWarm: false,
+      };
+    }
+
+    if (w && w.initializing > 0) {
       return {
         status: 'cold-start',
-        label: 'RunPod Fallback',
-        detail: 'GPU tunnel disconnected. RunPod available — first request may take ~30s (cold start).',
+        label: 'RunPod Starting...',
+        detail: `${w.initializing} worker${w.initializing !== 1 ? 's' : ''} initializing — will be ready shortly.`,
+        canWarm: false,
+      };
+    }
+
+    if (w) {
+      // health present but all worker counts are zero
+      return {
+        status: 'cold-start',
+        label: 'RunPod Available (cold)',
+        detail: 'No workers active. Click Warm Up to start a worker.',
         canWarm: true,
       };
     }
+
+    // runpod_health absent (relay unreachable or not yet returned health data)
     return {
       status: 'cold-start',
       label: 'RunPod Fallback',
-      detail: 'GPU tunnel disconnected. RunPod configured but no workers ready — click Warm Up to start.',
+      detail: 'GPU tunnel disconnected. RunPod configured — first request may take ~30s (cold start).',
       canWarm: true,
     };
   }
@@ -168,8 +193,9 @@ export function ConnectionStatus() {
     warmupPollRef.current = setInterval(async () => {
       const s = await checkStatus();
 
-      // Worker is ready when tunnel connects or RunPod has workers available
-      const ready = s?.tunnel_connected || s?.runpod_available;
+      // Worker is ready when tunnel connects or RunPod has idle/ready workers
+      const rw = s?.runpod_health?.workers;
+      const ready = s?.tunnel_connected || (rw && (rw.idle > 0 || rw.ready > 0));
 
       if (ready) {
         setWarmupLabel('⚡ Ready!');
