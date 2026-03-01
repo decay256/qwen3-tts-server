@@ -39,6 +39,20 @@ async def get_status(user: User = Depends(get_current_user)):
         }
 
 
+@router.post("/warmup")
+async def warmup(user: User = Depends(get_current_user)):
+    """Trigger RunPod worker scale-up (fire-and-forget).
+
+    Submits a lightweight job to RunPod to cause a worker to initialise.
+    Returns immediately with {"status": "warming"} or {"status": "connected"}.
+    Poll GET /status to track when the worker becomes ready.
+    """
+    try:
+        return await tts_proxy.tts_post("/api/v1/tts/warmup", {})
+    except TTSRelayError as e:
+        _relay_or_raise(e)
+
+
 # ── Voice Library (read) ────────────────────────────────────────────
 
 

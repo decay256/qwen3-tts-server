@@ -66,13 +66,28 @@ function useSecondsAgo(lastChecked: number | null): number {
   return seconds;
 }
 
+/** Warmup phase labels shown to the user while polling for worker readiness. */
+const WARMUP_PHASES = [
+  'Warming up...',
+  'Worker initializing...',
+  'Worker initializing...',
+  'Ready!',
+] as const;
+
+/** Max time (ms) to poll for worker readiness after a warmup request. */
+const WARMUP_POLL_MAX_MS = 120_000;
+/** Interval (ms) between status polls during warmup. */
+const WARMUP_POLL_INTERVAL_MS = 5_000;
+
 export function ConnectionStatus() {
   const [ttsStatus, setTtsStatus] = useState<TTSStatus | null>(null);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [warming, setWarming] = useState(false);
+  const [warmupLabel, setWarmupLabel] = useState<string>('🔥 Warm Up');
   const [lastChecked, setLastChecked] = useState<number | null>(null);
   const [flash, setFlash] = useState(false);
   const prevStatusRef = useRef<string | null>(null);
+  const warmupPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const secondsAgo = useSecondsAgo(lastChecked);
   const { setStatus: setBackendStatus } = useBackend();
 
@@ -81,11 +96,13 @@ export function ConnectionStatus() {
       const s = await apiJson<TTSStatus>('/api/v1/tts/status');
       setTtsStatus(s);
       setFetchError(null);
+      return s;
     } catch (e) {
       const msg = (e as Error).message;
       setFetchError(msg.includes('502') || msg.includes('503')
         ? 'TTS relay unreachable — server may be restarting'
         : msg);
+      return null;
     } finally {
       setLastChecked(Date.now());
     }
@@ -122,16 +139,62 @@ export function ConnectionStatus() {
     setBackendStatus(info.status as BackendStatus);
   }, [info.status, setBackendStatus]);
 
+  // Cleanup warmup polling on unmount
+  useEffect(() => {
+    return () => {
+      if (warmupPollRef.current) clearInterval(warmupPollRef.current);
+    };
+  }, []);
+
   const warmUp = async () => {
     setWarming(true);
+    setWarmupLabel('Warming up...');
+
     try {
-      await apiJson('/api/v1/tts/status');
-      await checkStatus();
+      // POST to the real warmup endpoint — triggers RunPod worker allocation
+      await apiJson('/api/v1/tts/warmup', { method: 'POST' });
     } catch {
-      // ignore — status will update via checkStatus
-    } finally {
-      setWarming(false);
+      // If the endpoint fails, still try polling — worker may already be starting
     }
+
+    // Poll status every 5s for up to 2 minutes to detect worker readiness
+    const deadline = Date.now() + WARMUP_POLL_MAX_MS;
+    let phaseIndex = 1; // start at "Worker initializing..." (phase 0 = "Warming up..." shown above)
+
+    setWarmupLabel(WARMUP_PHASES[1]);
+
+    if (warmupPollRef.current) clearInterval(warmupPollRef.current);
+
+    warmupPollRef.current = setInterval(async () => {
+      const s = await checkStatus();
+
+      // Worker is ready when tunnel connects or RunPod has workers available
+      const ready = s?.tunnel_connected || s?.runpod_available;
+
+      if (ready) {
+        setWarmupLabel('⚡ Ready!');
+        setWarming(false);
+        if (warmupPollRef.current) {
+          clearInterval(warmupPollRef.current);
+          warmupPollRef.current = null;
+        }
+        return;
+      }
+
+      // Advance phase label (cycle through initializing messages)
+      phaseIndex = Math.min(phaseIndex + 1, WARMUP_PHASES.length - 2);
+      setWarmupLabel(WARMUP_PHASES[phaseIndex]);
+
+      // Stop polling after deadline
+      if (Date.now() >= deadline) {
+        setWarmupLabel('🔥 Warm Up');
+        setWarming(false);
+        if (warmupPollRef.current) {
+          clearInterval(warmupPollRef.current);
+          warmupPollRef.current = null;
+        }
+      }
+    }, WARMUP_POLL_INTERVAL_MS);
   };
 
   const statusColor = {
@@ -158,7 +221,7 @@ export function ConnectionStatus() {
         </button>
         {info.canWarm && (
           <button onClick={warmUp} disabled={warming} className="btn-sm btn-secondary">
-            {warming ? '⏳ Warming...' : '🔥 Warm Up'}
+            {warming ? `⏳ ${warmupLabel}` : '🔥 Warm Up'}
           </button>
         )}
       </div>

@@ -22,6 +22,7 @@ import yaml
 from aiohttp import web
 
 from server.auth import AuthManager, extract_api_key
+from server.prompt_sync import GCSPromptStore, PromptGCSMetadata
 from server.runpod_client import RunPodClient
 from server.tunnel import TunnelServer
 
@@ -79,6 +80,14 @@ class RemoteRelay:
         else:
             self.runpod = None
             logger.info("RunPod fallback not configured")
+
+        # GCS prompt store — optional; gracefully skips if credentials unavailable
+        self.prompt_sync: Optional[GCSPromptStore] = None
+        try:
+            self.prompt_sync = GCSPromptStore()
+            logger.info("GCS prompt store initialized")
+        except Exception as exc:
+            logger.warning("GCS prompt store unavailable (no credentials?): %s", exc)
 
     def _check_auth(self, request: web.Request) -> bool:
         """Validate API key from request headers.
@@ -333,6 +342,46 @@ class RemoteRelay:
                 relay_status["local"] = {"error": str(e)}
 
         return web.json_response(relay_status)
+
+    async def handle_warmup(self, request: web.Request) -> web.Response:
+        """POST /api/v1/tts/warmup — trigger RunPod worker scale-up (fire-and-forget).
+
+        Submits a minimal /api/v1/status job to RunPod to cause a worker to
+        initialise.  Returns immediately; the caller should poll
+        GET /api/v1/tts/status to track when a worker becomes ready.
+        """
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+
+        # If the tunnel is already up there's nothing to warm.
+        if self.tunnel_server.has_client:
+            return web.json_response(
+                {"status": "connected", "message": "GPU tunnel is already connected"}
+            )
+
+        # RunPod must be configured to warm up.
+        if self.runpod is None:
+            return web.json_response(
+                {"error": "RunPod is not configured — cannot warm up"},
+                status=503,
+            )
+
+        # Fire-and-forget: submit a cheap status job so RunPod allocates a worker.
+        try:
+            job_id = await self.runpod.run_async("/api/v1/status", {})
+            logger.info("Warmup job submitted to RunPod: job_id=%s", job_id)
+            debug_event("warmup_submitted", job_id=job_id)
+        except Exception as e:
+            logger.warning("Warmup RunPod submission failed: %s", e)
+            return web.json_response(
+                {"error": f"Failed to submit warmup job to RunPod: {e}"},
+                status=502,
+            )
+
+        return web.json_response(
+            {"status": "warming", "message": "RunPod worker requested"}
+        )
 
     async def handle_tts_status(self, request: web.Request) -> web.Response:
         """GET /api/v1/tts/status — combined status for the web frontend.
@@ -834,6 +883,7 @@ class RemoteRelay:
         # API routes
         app.router.add_get("/api/v1/status", self.handle_status)
         app.router.add_get("/api/v1/tts/status", self.handle_tts_status)
+        app.router.add_post("/api/v1/tts/warmup", self.handle_warmup)
         app.router.add_get("/api/v1/tts/voices", self.handle_voices)
         app.router.add_post("/api/v1/tts/synthesize", self.handle_synthesize)
         app.router.add_post("/api/v1/tts/clone", self.handle_clone)
