@@ -121,13 +121,23 @@ class DesignRequest(BaseModel):
     instruct: str
     language: str = "English"
     format: str = "wav"
+    # Optional fields for inline clone-prompt creation (used by "Cast" button in UI)
+    create_prompt: bool | None = None
+    prompt_name: str | None = None
+    tags: list[str] | None = None
 
 
 @router.post("/voices/design")
 async def design_voice(body: DesignRequest, user: User = Depends(get_current_user)):
-    """Generate a single voice design clip."""
+    """Generate a single voice design clip.
+
+    Optionally creates a clone prompt from the generated audio when
+    ``create_prompt=True`` and ``prompt_name`` are supplied (used by the
+    "Cast" button in the UI).  These fields are forwarded to the relay
+    unchanged so the GPU server can persist the voice prompt.
+    """
     try:
-        return await tts_proxy.tts_post("/api/v1/voices/design", body.model_dump())
+        return await tts_proxy.tts_post("/api/v1/voices/design", body.model_dump(exclude_none=True))
     except TTSRelayError as e:
         _relay_or_raise(e)
 
