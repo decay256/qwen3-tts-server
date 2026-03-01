@@ -26,8 +26,11 @@ export interface TTSStatus {
   tunnel_connected: boolean;
   models_loaded: string[];
   prompts_count: number;
+  runpod_configured?: boolean;
   runpod_available?: boolean;
+  runpod_health?: unknown;
   error?: string;
+  local_error?: string;
 }
 
 export interface EmotionPreset {

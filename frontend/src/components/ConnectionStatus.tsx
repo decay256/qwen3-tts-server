@@ -24,12 +24,21 @@ function parseStatus(s: TTSStatus | null, err?: string): ConnectionInfo {
     };
   }
 
-  // Tunnel disconnected — check if RunPod is available
-  if (s.runpod_available) {
+  // Tunnel disconnected — check if RunPod is configured / available
+  if (s.runpod_configured) {
+    if (s.runpod_available) {
+      return {
+        status: 'cold-start',
+        label: 'RunPod Fallback',
+        detail: 'GPU tunnel disconnected. RunPod available — first request may take ~30s (cold start).',
+        canWarm: true,
+      };
+    }
+    // Configured but workers not yet ready (still cold)
     return {
       status: 'cold-start',
       label: 'RunPod Fallback',
-      detail: 'GPU tunnel disconnected. RunPod available — first request may take ~30s (cold start).',
+      detail: 'GPU tunnel disconnected. RunPod configured but no workers ready — click Warm Up to start.',
       canWarm: true,
     };
   }
