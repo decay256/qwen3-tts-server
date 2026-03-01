@@ -6,7 +6,8 @@ import { apiJson } from '../api/client';
 import { AudioPlayer } from '../components/AudioPlayer';
 import { ConnectionStatus } from '../components/ConnectionStatus';
 import { useBackend, backendReady } from '../context/BackendContext';
-import type { Character, VoicePrompt, DesignResult, RefineResult } from '../api/types';
+import type { Character, VoicePrompt, DesignResult, RefineResult, DraftSummary, Draft, TemplateSummary, Template } from '../api/types';
+import { api } from '../api/client';
 
 /* ── Types ──────────────────────────────────────────────────────── */
 
@@ -139,7 +140,28 @@ export function CharacterPage() {
   const [preview, setPreview] = useState<{ audio: string; format: string; label: string } | null>(null);
   const [generating, setGenerating] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<string | null>(null);
-  const [tab, setTab] = useState<'presets' | 'library'>('presets');
+  const [tab, setTab] = useState<'presets' | 'library' | 'drafts' | 'templates'>('presets');
+
+  // ── Draft queue state ──────────────────────────────────────────────────────
+  const [drafts, setDrafts] = useState<DraftSummary[]>([]);
+  const [draftsTotal, setDraftsTotal] = useState(0);
+  const [draftsLoading, setDraftsLoading] = useState(false);
+  const [draftAudio, setDraftAudio] = useState<{ id: string; audio_b64: string; format: string } | null>(null);
+  const [draftAudioLoading, setDraftAudioLoading] = useState<string | null>(null);
+  const [approvingDraft, setApprovingDraft] = useState<string | null>(null);
+  const [discardingDraft, setDiscardingDraft] = useState<string | null>(null);
+  const [generatingDraft, setGeneratingDraft] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // ── Template library state ─────────────────────────────────────────────────
+  const [templates, setTemplates] = useState<TemplateSummary[]>([]);
+  const [templatesTotal, setTemplatesTotal] = useState(0);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateAudio, setTemplateAudio] = useState<{ id: string; audio_b64: string; format: string } | null>(null);
+  const [templateAudioLoading, setTemplateAudioLoading] = useState<string | null>(null);
+  const [deletingTemplate, setDeletingTemplate] = useState<string | null>(null);
+  const [renamingTemplate, setRenamingTemplate] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
   const [filter, setFilter] = useState<'all' | 'emotions' | 'modes'>('all');
   const [refineKey, setRefineKey] = useState<string | null>(null);
   const [feedback, setFeedback] = useState('');
@@ -200,6 +222,188 @@ export function CharacterPage() {
   }, [character]);
 
   useEffect(() => { loadPrompts(); }, [loadPrompts]);
+
+  /* ── Draft queue ───────────────────────────────────────────── */
+
+  const fetchDrafts = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await apiJson<{ drafts: DraftSummary[]; total: number }>(
+        `/api/v1/drafts?character_id=${id}&limit=50`
+      );
+      setDrafts(data.drafts || []);
+      setDraftsTotal(data.total ?? 0);
+    } catch { /* silently ignore */ }
+  }, [id]);
+
+  // Initial load when switching to drafts tab
+  useEffect(() => {
+    if (tab === 'drafts') {
+      setDraftsLoading(true);
+      fetchDrafts().finally(() => setDraftsLoading(false));
+    }
+  }, [tab, fetchDrafts]);
+
+  // Poll every 3s when any draft is pending/generating
+  useEffect(() => {
+    const hasActive = drafts.some(d => d.status === 'pending' || d.status === 'generating');
+    if (tab === 'drafts' && hasActive) {
+      pollRef.current = setInterval(fetchDrafts, 3000);
+    }
+    return () => {
+      if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+    };
+  }, [tab, drafts, fetchDrafts]);
+
+  const generateDraft = useCallback(async (row: PresetRow) => {
+    if (!id) return;
+    const key = row.key;
+    setGeneratingDraft(key);
+    try {
+      await apiJson('/api/v1/drafts', {
+        method: 'POST',
+        body: JSON.stringify({
+          character_id: id,
+          preset_name: row.name,
+          preset_type: row.type,
+          intensity: row.type === 'emotion' ? row.intensity : undefined,
+          text: row.text || 'This is a sample sentence for voice preview.',
+          instruct: row.instruct,
+          language: 'English',
+        }),
+      });
+      // Switch to drafts tab so user can see the queue
+      setTab('drafts');
+      setDraftsLoading(true);
+      await fetchDrafts();
+      setDraftsLoading(false);
+    } catch (e) {
+      handleError(e, 'Generate Draft');
+    } finally {
+      setGeneratingDraft(null);
+    }
+  }, [id, fetchDrafts]);
+
+  const playDraft = useCallback(async (draftId: string) => {
+    if (draftAudioLoading === draftId) return;
+    setDraftAudioLoading(draftId);
+    try {
+      const data = await apiJson<{ draft: Draft }>(`/api/v1/drafts/${draftId}`);
+      if (data.draft.audio_b64) {
+        setDraftAudio({ id: draftId, audio_b64: data.draft.audio_b64, format: data.draft.audio_format });
+      }
+    } catch (e) {
+      handleError(e, 'Play Draft');
+    } finally {
+      setDraftAudioLoading(null);
+    }
+  }, [draftAudioLoading]);
+
+  const approveDraft = useCallback(async (draftId: string) => {
+    if (!id) return;
+    setApprovingDraft(draftId);
+    try {
+      await apiJson(`/api/v1/drafts/${draftId}/approve`, {
+        method: 'POST',
+        body: JSON.stringify({ character_id: id }),
+      });
+      // Refresh both tabs
+      await fetchDrafts();
+      fetchTemplates();
+    } catch (e) {
+      handleError(e, 'Approve Draft');
+    } finally {
+      setApprovingDraft(null);
+    }
+  }, [id, fetchDrafts]);
+
+  const discardDraft = useCallback(async (draftId: string) => {
+    setDiscardingDraft(draftId);
+    try {
+      const resp = await api(`/api/v1/drafts/${draftId}`, { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 204) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail ?? `HTTP ${resp.status}`);
+      }
+      setDrafts(prev => prev.filter(d => d.id !== draftId));
+      if (draftAudio?.id === draftId) setDraftAudio(null);
+    } catch (e) {
+      handleError(e, 'Discard Draft');
+    } finally {
+      setDiscardingDraft(null);
+    }
+  }, [draftAudio]);
+
+  /* ── Template library ──────────────────────────────────────── */
+
+  const fetchTemplates = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await apiJson<{ templates: TemplateSummary[]; total: number }>(
+        `/api/v1/templates?character_id=${id}&limit=50`
+      );
+      setTemplates(data.templates || []);
+      setTemplatesTotal(data.total ?? 0);
+    } catch { /* silently ignore */ }
+  }, [id]);
+
+  useEffect(() => {
+    if (tab === 'templates') {
+      setTemplatesLoading(true);
+      fetchTemplates().finally(() => setTemplatesLoading(false));
+    }
+  }, [tab, fetchTemplates]);
+
+  const playTemplate = useCallback(async (templateId: string) => {
+    if (templateAudioLoading === templateId) return;
+    setTemplateAudioLoading(templateId);
+    try {
+      const data = await apiJson<{ template: Template }>(`/api/v1/templates/${templateId}`);
+      setTemplateAudio({ id: templateId, audio_b64: data.template.audio_b64, format: data.template.audio_format });
+    } catch (e) {
+      handleError(e, 'Play Template');
+    } finally {
+      setTemplateAudioLoading(null);
+    }
+  }, [templateAudioLoading]);
+
+  const deleteTemplate = useCallback(async (templateId: string) => {
+    setDeletingTemplate(templateId);
+    try {
+      const resp = await api(`/api/v1/templates/${templateId}`, { method: 'DELETE' });
+      if (!resp.ok && resp.status !== 204) {
+        const body = await resp.json().catch(() => ({}));
+        throw new Error(body.detail ?? `HTTP ${resp.status}`);
+      }
+      setTemplates(prev => prev.filter(t => t.id !== templateId));
+      if (templateAudio?.id === templateId) setTemplateAudio(null);
+    } catch (e) {
+      handleError(e, 'Delete Template');
+    } finally {
+      setDeletingTemplate(null);
+    }
+  }, [templateAudio]);
+
+  const startRenameTemplate = (t: TemplateSummary) => {
+    setRenamingTemplate(t.id);
+    setRenameValue(t.name);
+  };
+
+  const saveRenameTemplate = useCallback(async (templateId: string) => {
+    const name = renameValue.trim();
+    if (!name) return;
+    try {
+      await apiJson(`/api/v1/templates/${templateId}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name }),
+      });
+      setTemplates(prev => prev.map(t => t.id === templateId ? { ...t, name } : t));
+    } catch (e) {
+      handleError(e, 'Rename Template');
+    } finally {
+      setRenamingTemplate(null);
+    }
+  }, [renameValue]);
 
   /* ── Error display helper ──────────────────────────────────── */
 
@@ -662,6 +866,17 @@ export function CharacterPage() {
         <button className={`tab ${tab === 'library' ? 'active' : ''}`} onClick={() => setTab('library')}>
           📚 Voice Library ({prompts.length})
         </button>
+        <button className={`tab ${tab === 'drafts' ? 'active' : ''}`} onClick={() => setTab('drafts')}>
+          📝 Drafts
+          {draftsTotal > 0 && <span className="tab-badge">{draftsTotal}</span>}
+          {drafts.some(d => d.status === 'pending' || d.status === 'generating') && (
+            <span className="tab-badge-active" title="Generation in progress" />
+          )}
+        </button>
+        <button className={`tab ${tab === 'templates' ? 'active' : ''}`} onClick={() => setTab('templates')}>
+          📋 Templates
+          {templatesTotal > 0 && <span className="tab-badge">{templatesTotal}</span>}
+        </button>
       </div>
 
       {/* ── Presets Tab ──────────────────────────────────────── */}
@@ -750,6 +965,14 @@ export function CharacterPage() {
                         title={!gpuAvailable ? noGpuTooltip : 'Cast — generate and save as reusable clone prompt'}
                       >
                         {isGenerating && generating === row.key + '_cast' ? '⏳' : '💾 Cast'}
+                      </button>
+                      <button
+                        onClick={e => { e.stopPropagation(); generateDraft(row); }}
+                        disabled={generatingDraft === row.key}
+                        className="btn-sm btn-draft"
+                        title="Queue a voice draft — review and approve in the Drafts tab"
+                      >
+                        {generatingDraft === row.key ? '⏳' : '📝 Draft'}
                       </button>
                       {!row.is_builtin && row.intensity !== 'intense' && (
                         <button
@@ -1052,6 +1275,222 @@ export function CharacterPage() {
                 </div>
               </div>
             ))
+          )}
+        </section>
+      )}
+
+      {/* ── Drafts Tab ───────────────────────────────────────── */}
+      {tab === 'drafts' && (
+        <section className="drafts-tab">
+          <div className="info-box">
+            <strong>Draft Queue</strong> — Generate a voice sample from any preset using the <strong>📝 Draft</strong> button.
+            Drafts appear here while audio generates. Play to review, then <strong>Approve</strong> to save as a Template.
+          </div>
+
+          {draftsLoading && drafts.length === 0 && (
+            <p className="empty">Loading drafts…</p>
+          )}
+
+          {!draftsLoading && drafts.length === 0 && (
+            <p className="empty">
+              No drafts yet. Use the <strong>📝 Draft</strong> button on any preset to queue a voice generation.
+            </p>
+          )}
+
+          {drafts.length > 0 && (
+            <div className="draft-list">
+              {drafts.map(draft => {
+                const isApproving = approvingDraft === draft.id;
+                const isDiscarding = discardingDraft === draft.id;
+                const isLoadingAudio = draftAudioLoading === draft.id;
+                const showingAudio = draftAudio?.id === draft.id;
+
+                return (
+                  <div key={draft.id} className={`draft-card draft-status-${draft.status}`}>
+                    <div className="draft-header">
+                      <div className="draft-meta">
+                        <span className={`draft-status-badge ${draft.status}`}>
+                          {draft.status === 'pending' && '⏳ Pending'}
+                          {draft.status === 'generating' && '🔄 Generating'}
+                          {draft.status === 'ready' && '✅ Ready'}
+                          {draft.status === 'failed' && '❌ Failed'}
+                          {draft.status === 'approved' && '✓ Approved'}
+                        </span>
+                        <span className="draft-preset">
+                          {draft.preset_type === 'emotion' ? '😊' : '🎤'} {draft.preset_name}
+                          {draft.intensity && <span className={`badge intensity-${draft.intensity}`}>{draft.intensity}</span>}
+                        </span>
+                        {draft.duration_s && (
+                          <span className="hint">{draft.duration_s.toFixed(1)}s</span>
+                        )}
+                      </div>
+                      <div className="draft-actions">
+                        {draft.status === 'ready' && (
+                          <>
+                            <button
+                              onClick={() => playDraft(draft.id)}
+                              disabled={isLoadingAudio}
+                              className="btn-sm"
+                              title="Load and play audio"
+                            >
+                              {isLoadingAudio ? '⏳' : showingAudio ? '🔊 Playing' : '▶ Play'}
+                            </button>
+                            <button
+                              onClick={() => approveDraft(draft.id)}
+                              disabled={isApproving}
+                              className="btn-sm btn-approve"
+                              title="Approve — save as Character Template"
+                            >
+                              {isApproving ? '⏳' : '✓ Approve'}
+                            </button>
+                          </>
+                        )}
+                        {draft.status === 'approved' && showingAudio && (
+                          <button
+                            onClick={() => playDraft(draft.id)}
+                            disabled={isLoadingAudio}
+                            className="btn-sm"
+                            title="Play audio"
+                          >
+                            {isLoadingAudio ? '⏳' : '▶ Play'}
+                          </button>
+                        )}
+                        <button
+                          onClick={() => discardDraft(draft.id)}
+                          disabled={isDiscarding || draft.status === 'generating'}
+                          className="btn-sm btn-danger"
+                          title={draft.status === 'generating' ? 'Cannot discard while generating' : 'Discard this draft'}
+                        >
+                          {isDiscarding ? '⏳' : '🗑'}
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="draft-text">"{draft.text}"</p>
+
+                    {draft.status === 'failed' && draft.error && (
+                      <p className="draft-error">⚠ {draft.error}</p>
+                    )}
+
+                    {showingAudio && draftAudio && (
+                      <div className="draft-audio">
+                        <AudioPlayer audioBase64={draftAudio.audio_b64} format={draftAudio.format} />
+                      </div>
+                    )}
+
+                    <div className="draft-footer">
+                      <span className="hint">
+                        {new Date(draft.created_at).toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── Templates Tab ────────────────────────────────────── */}
+      {tab === 'templates' && (
+        <section className="templates-tab">
+          <div className="info-box">
+            <strong>Templates</strong> are approved voice references for this character. Each template captures a
+            specific preset, delivery style, and audio sample. Approve a draft to add templates here.
+          </div>
+
+          {templatesLoading && templates.length === 0 && (
+            <p className="empty">Loading templates…</p>
+          )}
+
+          {!templatesLoading && templates.length === 0 && (
+            <p className="empty">
+              No templates yet. Generate drafts in the <strong>📝 Drafts</strong> tab and approve the best ones.
+            </p>
+          )}
+
+          {templates.length > 0 && (
+            <div className="template-grid">
+              {templates.map(tmpl => {
+                const isDeletingThis = deletingTemplate === tmpl.id;
+                const isRenaming = renamingTemplate === tmpl.id;
+                const isLoadingAudio = templateAudioLoading === tmpl.id;
+                const showingAudio = templateAudio?.id === tmpl.id;
+
+                return (
+                  <div key={tmpl.id} className="template-card">
+                    <div className="template-header">
+                      {isRenaming ? (
+                        <div className="rename-form">
+                          <input
+                            value={renameValue}
+                            onChange={e => setRenameValue(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === 'Enter') saveRenameTemplate(tmpl.id);
+                              if (e.key === 'Escape') setRenamingTemplate(null);
+                            }}
+                            className="rename-input"
+                            autoFocus
+                          />
+                          <button onClick={() => saveRenameTemplate(tmpl.id)} className="btn-sm btn-approve">✓</button>
+                          <button onClick={() => setRenamingTemplate(null)} className="btn-sm">✕</button>
+                        </div>
+                      ) : (
+                        <span
+                          className="template-name"
+                          onClick={() => startRenameTemplate(tmpl)}
+                          title="Click to rename"
+                        >
+                          {tmpl.name}
+                          <span className="rename-hint">✎</span>
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="template-meta">
+                      <span className="draft-preset">
+                        {tmpl.preset_type === 'emotion' ? '😊' : '🎤'} {tmpl.preset_name}
+                        {tmpl.intensity && <span className={`badge intensity-${tmpl.intensity}`}>{tmpl.intensity}</span>}
+                      </span>
+                      {tmpl.duration_s && (
+                        <span className="hint">{tmpl.duration_s.toFixed(1)}s</span>
+                      )}
+                    </div>
+
+                    <p className="draft-text">"{tmpl.text}"</p>
+
+                    <div className="template-actions">
+                      <button
+                        onClick={() => playTemplate(tmpl.id)}
+                        disabled={isLoadingAudio}
+                        className="btn-sm"
+                        title="Load and play template audio"
+                      >
+                        {isLoadingAudio ? '⏳' : showingAudio ? '🔊 Playing' : '▶ Play'}
+                      </button>
+                      <button
+                        onClick={() => deleteTemplate(tmpl.id)}
+                        disabled={isDeletingThis}
+                        className="btn-sm btn-danger"
+                        title="Delete this template"
+                      >
+                        {isDeletingThis ? '⏳' : '🗑'}
+                      </button>
+                    </div>
+
+                    {showingAudio && templateAudio && (
+                      <div className="draft-audio">
+                        <AudioPlayer audioBase64={templateAudio.audio_b64} format={templateAudio.format} />
+                      </div>
+                    )}
+
+                    <div className="draft-footer">
+                      <span className="hint">{new Date(tmpl.created_at).toLocaleString()}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           )}
         </section>
       )}
