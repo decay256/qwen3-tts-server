@@ -26,13 +26,14 @@ logger = logging.getLogger(__name__)
 # ── Global state ────────────────────────────────────────────────────
 engine = None
 prompt_store = None
+gcs_prompt_store = None
 start_time = None
 init_error = None
 
 
 def init():
     """Load models once at worker startup."""
-    global engine, prompt_store, start_time, init_error
+    global engine, prompt_store, gcs_prompt_store, start_time, init_error
     start_time = time.time()
 
     # Warn loudly if no API key is configured.  RunPod has its own auth layer
@@ -68,6 +69,16 @@ def init():
         prompts_dir = os.environ.get("PROMPTS_DIR", "./voice-prompts")
         prompt_store = PromptStore(prompts_dir)
         logger.info("Prompt store: %d prompts", len(prompt_store.list_prompts()))
+
+        # GCS prompt store — best-effort; fails gracefully if no credentials
+        try:
+            from server.prompt_sync import GCSPromptStore
+            gcs_prompt_store = GCSPromptStore(cache_dir=prompts_dir)
+            logger.info("GCS prompt store initialized (cache=%s)", prompts_dir)
+        except Exception as gcs_exc:
+            gcs_prompt_store = None
+            logger.warning("GCS prompt store unavailable (no credentials?): %s", gcs_exc)
+
         logger.info("Init complete in %.1fs", time.time() - start_time)
 
     except Exception as e:
@@ -179,6 +190,33 @@ def handle_clone_prompt_create(body):
 
 def handle_synthesize_with_prompt(body):
     prompt_name = body["voice_prompt"]
+
+    # Attempt GCS download if the prompt is not present locally.
+    # This allows RunPod workers (which start with empty voice-prompts dirs)
+    # to serve clone-prompt synthesis using prompts uploaded from the tunnel.
+    if gcs_prompt_store is not None:
+        voices_dir = os.environ.get("PROMPTS_DIR", "./voice-prompts")
+        local_pt = os.path.join(voices_dir, f"{prompt_name}.pt")
+        local_prompt = os.path.join(voices_dir, f"{prompt_name}.prompt")
+        if not os.path.exists(local_prompt) and not os.path.exists(local_pt):
+            try:
+                result = gcs_prompt_store.ensure_local(prompt_name, voices_dir)
+                logger.info(
+                    "GCS ensure_local: prompt '%s' → %s (cache_hit=%s)",
+                    prompt_name, result.local_path, result.cache_hit,
+                )
+                # Rename .pt → .prompt so PromptStore.load_prompt() can find it
+                if result.local_path.endswith(".pt"):
+                    prompt_path = result.local_path[:-3] + ".prompt"
+                    if not os.path.exists(prompt_path):
+                        import shutil
+                        shutil.copy2(result.local_path, prompt_path)
+                        logger.info("Copied %s → %s for PromptStore compatibility", result.local_path, prompt_path)
+            except FileNotFoundError:
+                logger.warning("GCS ensure_local: prompt '%s' not found in GCS", prompt_name)
+            except Exception as exc:
+                logger.warning("GCS ensure_local failed for '%s' (non-fatal): %s", prompt_name, exc)
+
     prompt_data = prompt_store.load_prompt(prompt_name)
     if not prompt_data:
         return {"error": f"Prompt '{prompt_name}' not found"}

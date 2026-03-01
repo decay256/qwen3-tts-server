@@ -6,3 +6,4 @@ numpy>=1.24.0
 ffmpeg-python>=0.2.0
 praat-parselmouth>=0.4.0
 aioresponses>=0.7.0
+google-cloud-storage>=2.0.0
