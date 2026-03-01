@@ -269,6 +269,28 @@ class RemoteRelay:
 
     # --- Route handlers ---
 
+    async def _get_runpod_status(self) -> tuple[bool, dict | None]:
+        """Check RunPod availability with a fast health call.
+
+        Returns:
+            (available, health_dict) where available is True if workers > 0.
+            health_dict contains the raw health response or an error entry.
+        """
+        if self.runpod is None:
+            return False, None
+        try:
+            health = await asyncio.wait_for(self.runpod.health(), timeout=5.0)
+            workers = health.get("workers", {})
+            total_workers = (
+                workers.get("ready", 0)
+                + workers.get("idle", 0)
+                + workers.get("initializing", 0)
+                + workers.get("running", 0)
+            )
+            return total_workers > 0, health
+        except Exception as e:
+            return False, {"error": str(e)}
+
     async def handle_status(self, request: web.Request) -> web.Response:
         """GET /api/v1/status — relay status + forward to local if connected."""
         auth_error = await self._require_auth(request)
@@ -280,7 +302,14 @@ class RemoteRelay:
             "tunnel_connected": self.tunnel_server.has_client,
             "connected_clients": self.tunnel_server.connected_clients,
             "uptime_seconds": round(time.time() - self.start_time, 1),
+            "runpod_configured": self.runpod is not None,
         }
+
+        # RunPod health check (skip if not configured)
+        runpod_available, runpod_health = await self._get_runpod_status()
+        relay_status["runpod_available"] = runpod_available
+        if runpod_health is not None:
+            relay_status["runpod_health"] = runpod_health
 
         if self.tunnel_server.has_client:
             try:
@@ -291,6 +320,46 @@ class RemoteRelay:
                 relay_status["local"] = {"error": str(e)}
 
         return web.json_response(relay_status)
+
+    async def handle_tts_status(self, request: web.Request) -> web.Response:
+        """GET /api/v1/tts/status — combined status for the web frontend.
+
+        Returns a flat, merged response with tunnel status, RunPod availability,
+        and local server info (models_loaded, prompts_count) when the tunnel
+        is connected.
+        """
+        auth_error = await self._require_auth(request)
+        if auth_error:
+            return auth_error
+
+        status: dict = {
+            "status": "ok",
+            "tunnel_connected": self.tunnel_server.has_client,
+            "runpod_configured": self.runpod is not None,
+            "runpod_available": False,
+            "models_loaded": [],
+            "prompts_count": 0,
+        }
+
+        # RunPod health check (skip if not configured)
+        runpod_available, runpod_health = await self._get_runpod_status()
+        status["runpod_available"] = runpod_available
+        if runpod_health is not None:
+            status["runpod_health"] = runpod_health
+
+        # Forward to local if tunnel is up and merge top-level fields
+        if self.tunnel_server.has_client:
+            try:
+                local_response = await self.tunnel_server.send_request("GET", "/api/v1/status")
+                local_status = json.loads(local_response.body or "{}")
+                status["models_loaded"] = local_status.get("models_loaded", [])
+                status["prompts_count"] = local_status.get("prompts_count", 0)
+                if "error" in local_status:
+                    status["local_error"] = local_status["error"]
+            except Exception as e:
+                status["local_error"] = str(e)
+
+        return web.json_response(status)
 
     async def handle_voices(self, request: web.Request) -> web.Response:
         """GET /api/v1/tts/voices."""
@@ -731,6 +800,7 @@ class RemoteRelay:
 
         # API routes
         app.router.add_get("/api/v1/status", self.handle_status)
+        app.router.add_get("/api/v1/tts/status", self.handle_tts_status)
         app.router.add_get("/api/v1/tts/voices", self.handle_voices)
         app.router.add_post("/api/v1/tts/synthesize", self.handle_synthesize)
         app.router.add_post("/api/v1/tts/clone", self.handle_clone)
