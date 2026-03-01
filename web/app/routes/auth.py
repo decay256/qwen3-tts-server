@@ -15,6 +15,7 @@ from web.app.core.security import (
     hash_password,
     verify_password,
 )
+from web.app.core.config import settings
 from web.app.models.user import User
 
 router = APIRouter(prefix="/auth", tags=["auth"])
@@ -73,12 +74,20 @@ async def register(body: RegisterRequest, request: Request, db: AsyncSession = D
     if result.scalar_one_or_none():
         raise HTTPException(status_code=409, detail="Email already registered")
 
+    # In non-production environments, auto-verify accounts so developers can log in
+    # without needing a verified Resend domain.
+    auto_verify = settings.env.lower() != "production"
+
     user = User(
         email=body.email.lower(),
         password_hash=hash_password(body.password),
+        is_verified=auto_verify,
     )
     db.add(user)
     await db.commit()
+
+    if auto_verify:
+        return {"message": f"Account created and auto-verified (env={settings.env})."}
 
     # Send verification email (best-effort)
     base_url = str(request.base_url).rstrip("/")

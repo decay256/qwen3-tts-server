@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     # App
     app_name: str = "Voice Studio"
     debug: bool = False
+    env: str = "production"  # Set to "development" or "staging" to auto-verify emails
     cors_origins: list[str] = ["http://localhost:5173"]  # Vite dev server
 
     # Database

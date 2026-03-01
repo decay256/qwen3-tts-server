@@ -119,3 +119,40 @@ async def test_reset_confirm_invalid_token(client: AsyncClient):
         "new_password": "newpassword123",
     })
     assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Auto-verify email in non-prod (Sprint 3 — issue #26)
+# ---------------------------------------------------------------------------
+
+@pytest.mark.asyncio
+async def test_register_auto_verify_in_non_prod(client: AsyncClient, monkeypatch):
+    """In non-production env, registration auto-verifies the account."""
+    from web.app.routes import auth as auth_module
+    from web.app.core.config import settings
+
+    monkeypatch.setattr(settings, "env", "development")
+    resp = await client.post("/auth/register", json={
+        "email": "autoverify@example.com",
+        "password": "securepassword",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "auto-verified" in data["message"]
+    assert "development" in data["message"]
+
+
+@pytest.mark.asyncio
+async def test_register_no_auto_verify_in_production(client: AsyncClient, monkeypatch):
+    """In production env, registration does NOT auto-verify — sends email instead."""
+    from web.app.core.config import settings
+
+    monkeypatch.setattr(settings, "env", "production")
+    resp = await client.post("/auth/register", json={
+        "email": "nonauto@example.com",
+        "password": "securepassword",
+    })
+    assert resp.status_code == 201
+    data = resp.json()
+    assert "verify" in data["message"].lower()
+    assert "auto-verified" not in data["message"]

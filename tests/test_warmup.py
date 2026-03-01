@@ -226,3 +226,92 @@ async def test_warmup_runpod_run_async_error_returns_502(client_with_runpod):
     assert resp.status == 502
     data = await resp.json()
     assert "error" in data
+
+
+# ---------------------------------------------------------------------------
+# Idempotency: noop when workers already ready (Sprint 3 — issue #22)
+# ---------------------------------------------------------------------------
+
+def make_relay_with_health(
+    tunnel_has_client: bool = False,
+    health_response: dict | None = None,
+) -> RemoteRelay:
+    """Build a RemoteRelay with a properly mocked RunPod health() call."""
+    relay = RemoteRelay.__new__(RemoteRelay)
+    relay.config = BASE_CONFIG
+    relay.api_key = API_KEY
+    from server.auth import AuthManager
+    relay.auth_manager = AuthManager(API_KEY)
+    relay.start_time = 0.0
+
+    tunnel = MagicMock()
+    tunnel.has_client = tunnel_has_client
+    tunnel.connected_clients = 1 if tunnel_has_client else 0
+    relay.tunnel_server = tunnel
+
+    runpod = MagicMock()
+    runpod.run_async = AsyncMock(return_value="job-warm-002")
+    runpod.health = AsyncMock(return_value=health_response or {})
+    relay.runpod = runpod
+
+    return relay
+
+
+@pytest_asyncio.fixture
+async def client_runpod_workers_idle():
+    """RunPod configured, 2 idle workers — warmup should noop."""
+    health = {
+        "workers": {"ready": 1, "idle": 1, "initializing": 0, "running": 0, "throttled": 0, "unhealthy": 0},
+        "jobs": {"queued": 0, "inProgress": 0, "completed": 5, "failed": 0, "retried": 0, "badfailed": 0},
+    }
+    relay = make_relay_with_health(health_response=health)
+    app = relay.create_app()
+    async with TestClient(TestServer(app)) as client:
+        client._relay = relay  # type: ignore[attr-defined]
+        yield client
+
+
+@pytest_asyncio.fixture
+async def client_runpod_workers_busy():
+    """RunPod configured, all workers running (none idle/ready) — warmup should submit a job."""
+    health = {
+        "workers": {"ready": 0, "idle": 0, "initializing": 0, "running": 2, "throttled": 0, "unhealthy": 0},
+        "jobs": {"queued": 1, "inProgress": 2, "completed": 10, "failed": 0, "retried": 0, "badfailed": 0},
+    }
+    relay = make_relay_with_health(health_response=health)
+    app = relay.create_app()
+    async with TestClient(TestServer(app)) as client:
+        client._relay = relay  # type: ignore[attr-defined]
+        yield client
+
+
+@pytest.mark.asyncio
+async def test_warmup_noop_when_workers_ready(client_runpod_workers_idle):
+    """Warmup returns noop when workers are already idle/ready — no job submitted."""
+    resp = await client_runpod_workers_idle.post(
+        "/api/v1/tts/warmup",
+        headers=AUTH_HEADERS,
+    )
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["status"] == "noop"
+    assert "already ready" in data["message"].lower() or "no warmup" in data["message"].lower()
+    assert data["workers_ready"] == 2  # 1 ready + 1 idle
+
+    # Must NOT have submitted a new job
+    client_runpod_workers_idle._relay.runpod.run_async.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_warmup_submits_job_when_workers_busy(client_runpod_workers_busy):
+    """Warmup submits a job when all workers are running (none idle/ready)."""
+    resp = await client_runpod_workers_busy.post(
+        "/api/v1/tts/warmup",
+        headers=AUTH_HEADERS,
+    )
+    assert resp.status == 200
+    data = await resp.json()
+    assert data["status"] == "warming"
+
+    # Must have submitted a new job
+    client_runpod_workers_busy._relay.runpod.run_async.assert_awaited_once()
