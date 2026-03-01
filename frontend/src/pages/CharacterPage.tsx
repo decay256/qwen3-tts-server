@@ -1039,6 +1039,7 @@ export function CharacterPage() {
                       </div>
                     </div>
 
+                    <p className="draft-instruct">🎯 {draft.instruct}</p>
                     <p className="draft-text">"{draft.text}"</p>
 
                     {draft.status === 'failed' && draft.error && (
@@ -1130,6 +1131,7 @@ export function CharacterPage() {
                       )}
                     </div>
 
+                    <p className="draft-instruct">🎯 {tmpl.instruct}</p>
                     <p className="draft-text">"{tmpl.text}"</p>
 
                     <div className="template-actions">

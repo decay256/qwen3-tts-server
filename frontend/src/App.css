@@ -1139,3 +1139,11 @@ code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; f
   background: rgba(234, 179, 8, 0.22);
   border-color: var(--warning);
 }
+
+/* Draft/Template instruct display */
+.draft-instruct {
+  font-size: 0.85rem;
+  color: var(--text-secondary, #a0a0b0);
+  margin: 0.25rem 0;
+  font-style: italic;
+}
