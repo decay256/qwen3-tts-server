@@ -54,12 +54,25 @@ flowchart LR
 
 ## Active Sprint
 
-**Sprint 1: RunPod Preview Rendering**
+**No active sprint** — awaiting PO to propose Sprint 3 backlog.
+
+---
+
+## Completed Sprints
+
+### Sprint 2: Fix RunPod Status & Connection UX (2026-03-01) ✅ DONE
+- **Goal:** Accurate GPU status display + working warmup + verified audio playback
+- **DoD:** Status shows correct state → Warm Up transitions to green → Preview plays audio
+- **Proposal:** `docs/sprint2-proposal.md`
+- **Review:** `docs/sprint2-review.md`
+- **Issues:** #16 ✅, #17 ✅, #18 ✅, #19 ✅ (10 points — 100%)
+- **PRs merged:** #20 (contracts), #21 (frontend)
+
+### Sprint 1: RunPod Preview Rendering (2026-03-01) ✅ DONE
 - **Goal:** User can run a preview rendering for a character from the frontend
 - **DoD:** Open character page → click Preview → hear audio (even on RunPod cold start)
 - **Proposal:** `docs/sprint1-proposal.md`
-- **Issues:** #10, #11, #12, #13 (13 points)
-- **Status:** #10 ✅, #11 ✅, #12 ✅ (fix pushed), #13 ⬜ (QA not yet run)
+- **Issues:** #10 ✅, #11 ✅, #12 ✅, #13 ✅ (13 points)
 
 ## Component Status
 
