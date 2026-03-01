@@ -1,0 +1,315 @@
+# contracts/draft-api.yaml
+# Sprint 4 — Draft Workflow & Character Templates
+version: "1.0"
+component: draft-service
+maturity: mvp
+nfr:
+  latency_p99_ms: 500        # list/get endpoints; generation is async
+  availability: "99.9%"
+  auth_required: true        # all endpoints require Bearer token
+  audio_storage: base64_sqlite  # MVP decision — avoids file-system management;
+                                # migrate to file-path storage at Product maturity
+  async_model: polling       # MVP decision — background task + poll endpoint;
+                             # no WebSocket infrastructure needed at this stage
+  draft_retention: manual    # drafts are kept until user discards; no auto-expiry at MVP
+
+# ── Design Decisions ──────────────────────────────────────────────────────────
+#
+# 1. AUDIO STORAGE — base64 in SQLite column
+#    Rationale: Audio clips are small (~50-200 KB WAV). SQLite handles this
+#    cleanly. Avoids file-path management, serving, permissions, and cleanup.
+#    Migration path: at Product maturity, move audio_b64 → audio_path with
+#    a dedicated audio file store (e.g. local disk / object storage).
+#
+# 2. ASYNC JOB TRACKING — polling
+#    Rationale: TTS generation takes 1–15 seconds (RunPod cold start included).
+#    A synchronous HTTP request would time out and block the UI. We:
+#      a) Create the Draft record immediately (status=pending)
+#      b) Kick off a background task (FastAPI BackgroundTasks) that calls the
+#         TTS relay and writes audio_b64 + status=ready on completion
+#      c) Frontend polls GET /api/v1/drafts (every 3s) until status=ready
+#    WebSocket is deferred to Sprint 5+ when queue volume justifies it.
+#
+# 3. DRAFT RETENTION — manual
+#    Drafts persist until the user explicitly discards them. No auto-expiry
+#    at MVP — avoids surprise data loss. Bulk-discard endpoint provided for UX.
+#
+# 4. TEMPLATE vs CLONE PROMPT
+#    A Template is a local metadata record (character + instruct + audio + preset).
+#    It does NOT automatically create a GPU-side clone prompt in Sprint 4.
+#    Clone-prompt creation on approve is deferred to Sprint 5 to avoid
+#    GPU side-effects during the approval flow.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Schemas ───────────────────────────────────────────────────────────────────
+
+schemas:
+  Draft:
+    description: >
+      A voice generation job. Created when the user clicks "Generate Draft"
+      on a preset. Transitions: pending → generating → ready | failed.
+      Approved drafts have status=approved and a linked Template record.
+    fields:
+      id: "string (UUID) — unique draft id"
+      user_id: "string (UUID) — owning user"
+      character_id: "string (UUID) | null — linked character (null if generated outside character context)"
+      preset_name: "string — name of the preset used"
+      preset_type: "string — 'emotion' | 'mode'"
+      intensity: "string | null — 'medium' | 'intense' (emotion presets only)"
+      text: "string — synthesis text submitted"
+      instruct: "string — instruction string used for generation"
+      language: "string — e.g. 'English'"
+      status: "string — 'pending' | 'generating' | 'ready' | 'failed' | 'approved'"
+      audio_b64: "string | null — base64-encoded WAV audio (null until status=ready)"
+      audio_format: "string — 'wav' (always wav at MVP)"
+      duration_s: "float | null — audio duration in seconds (null until status=ready)"
+      error: "string | null — error message (set when status=failed)"
+      created_at: "string (ISO 8601 UTC)"
+      updated_at: "string (ISO 8601 UTC)"
+    notes:
+      - "audio_b64 MUST NOT be returned by list endpoints (too large). Only included in GET /api/v1/drafts/{id}."
+      - "Frontend should poll GET /api/v1/drafts every 3 seconds while any draft has status pending|generating."
+      - "Approved drafts remain in the queue (status=approved) until manually discarded."
+
+  DraftSummary:
+    description: >
+      Draft without audio_b64 — safe for list responses. Frontend uses this
+      for the queue view; fetches full Draft only when playing audio.
+    fields:
+      id: "string (UUID)"
+      user_id: "string (UUID)"
+      character_id: "string (UUID) | null"
+      character_name: "string | null — joined from characters table for display"
+      preset_name: "string"
+      preset_type: "string"
+      intensity: "string | null"
+      text: "string (truncated to 120 chars in response)"
+      instruct: "string"
+      language: "string"
+      status: "string"
+      audio_format: "string"
+      duration_s: "float | null"
+      error: "string | null"
+      created_at: "string (ISO 8601 UTC)"
+      updated_at: "string (ISO 8601 UTC)"
+
+  Template:
+    description: >
+      An approved voice template for a character. Created by approving a Draft.
+      Represents the canonical voice identity for a character at a given
+      preset + intensity combination.
+    fields:
+      id: "string (UUID)"
+      user_id: "string (UUID)"
+      character_id: "string (UUID) — required; templates always belong to a character"
+      character_name: "string — joined from characters table for display"
+      draft_id: "string (UUID) — the Draft this was approved from"
+      name: "string — user-visible label (auto-generated from character+preset, editable)"
+      preset_name: "string"
+      preset_type: "string"
+      intensity: "string | null"
+      instruct: "string — the instruction that produced this voice"
+      text: "string — the ref text used for generation"
+      audio_b64: "string — base64-encoded WAV (copied from Draft on approve)"
+      audio_format: "string — 'wav'"
+      duration_s: "float | null"
+      language: "string"
+      created_at: "string (ISO 8601 UTC)"
+    notes:
+      - "audio_b64 MUST NOT be returned by list endpoints. Only in GET /api/v1/templates/{id}."
+      - "No GPU clone-prompt is created on approve at Sprint 4. Deferred to Sprint 5."
+
+  TemplateSummary:
+    description: "Template without audio_b64 — for list responses."
+    fields:
+      id: "string (UUID)"
+      user_id: "string (UUID)"
+      character_id: "string (UUID)"
+      character_name: "string"
+      draft_id: "string (UUID)"
+      name: "string"
+      preset_name: "string"
+      preset_type: "string"
+      intensity: "string | null"
+      instruct: "string"
+      text: "string (truncated to 120 chars)"
+      audio_format: "string"
+      duration_s: "float | null"
+      language: "string"
+      created_at: "string (ISO 8601 UTC)"
+
+# ── Endpoints — Drafts ────────────────────────────────────────────────────────
+
+endpoints:
+  POST /api/v1/drafts:
+    description: >
+      Create a new draft job. Immediately creates the Draft record with
+      status=pending, then kicks off a background task to call the TTS relay
+      and populate audio_b64. Returns the Draft record (without audio_b64).
+    auth: required
+    request:
+      body:
+        character_id: "string (UUID) | null — optional character context"
+        preset_name: "string (required) — name of the preset"
+        preset_type: "string (required) — 'emotion' | 'mode'"
+        intensity: "string | null — 'medium' | 'intense' (required when preset_type=emotion)"
+        text: "string (required) — text to synthesize"
+        instruct: "string (required) — instruction for the voice"
+        language: "string — default 'English'"
+    response:
+      201:
+        draft: "DraftSummary (status=pending, audio_b64 absent)"
+      400:
+        error: "string — validation error (e.g. missing intensity for emotion preset)"
+      404:
+        error: "string — character_id not found or not owned by user"
+
+  GET /api/v1/drafts:
+    description: >
+      List all drafts for the current user. Ordered by created_at desc.
+      Does NOT include audio_b64 (use GET /api/v1/drafts/{id} for audio).
+      Frontend polls this every 3 seconds while any draft is pending|generating.
+    auth: required
+    query_params:
+      character_id: "string (optional) — filter by character"
+      status: "string (optional) — filter: pending|generating|ready|failed|approved|all (default: all)"
+      limit: "integer (optional) — max results, default 50, max 200"
+      offset: "integer (optional) — pagination offset, default 0"
+    response:
+      200:
+        drafts: "list[DraftSummary] — ordered by created_at desc"
+        total: "integer — total matching drafts (for pagination)"
+
+  GET /api/v1/drafts/{draft_id}:
+    description: >
+      Get a single draft by id, INCLUDING audio_b64 (for playback).
+      Frontend calls this when the user clicks play on a ready draft.
+    auth: required
+    response:
+      200:
+        draft: "Draft (full, includes audio_b64 when status=ready|approved)"
+      404:
+        error: "string — draft not found or not owned by user"
+
+  DELETE /api/v1/drafts/{draft_id}:
+    description: >
+      Discard a draft. Cannot discard a draft with status=generating (must wait for
+      completion or failure first). Approved drafts can be discarded; their Template
+      record is NOT deleted (Template is independent once created).
+    auth: required
+    response:
+      204: "no content"
+      400:
+        error: "string — cannot discard a draft in status=generating"
+      404:
+        error: "string — draft not found or not owned by user"
+
+  POST /api/v1/drafts/{draft_id}/approve:
+    description: >
+      Approve a draft — promotes it to a Character Template.
+      Draft must have status=ready. Creates a Template record, sets
+      draft status=approved.
+      Returns the created Template (without audio_b64).
+    auth: required
+    request:
+      body:
+        character_id: "string (UUID, required) — character to assign template to.
+                        May differ from draft.character_id (user can reassign on approve)."
+        name: "string (optional) — template label. Default: '{character_name} – {preset_name} ({intensity})'"
+    response:
+      201:
+        template: "TemplateSummary"
+      400:
+        error: "string — draft not in status=ready, or already approved"
+      404:
+        error: "string — draft or character not found"
+
+  POST /api/v1/drafts/{draft_id}/regenerate:
+    description: >
+      Regenerate a failed or ready draft. Creates a NEW draft with the same
+      parameters and returns it (old draft remains). This avoids mutation
+      of draft history.
+    auth: required
+    request:
+      body:
+        instruct: "string (optional) — override instruct for the new draft"
+        text: "string (optional) — override text for the new draft"
+    response:
+      201:
+        draft: "DraftSummary (new draft, status=pending)"
+      404:
+        error: "string — original draft not found"
+
+# ── Endpoints — Templates ─────────────────────────────────────────────────────
+
+  GET /api/v1/templates:
+    description: >
+      List all templates for the current user across all characters.
+      Does NOT include audio_b64.
+    auth: required
+    query_params:
+      character_id: "string (optional) — filter by character"
+      preset_type: "string (optional) — filter: emotion|mode"
+      limit: "integer (optional) — default 50, max 200"
+      offset: "integer (optional) — default 0"
+    response:
+      200:
+        templates: "list[TemplateSummary] — ordered by created_at desc"
+        total: "integer"
+
+  GET /api/v1/templates/{template_id}:
+    description: "Get a single template including audio_b64."
+    auth: required
+    response:
+      200:
+        template: "Template (full, includes audio_b64)"
+      404:
+        error: "string — template not found or not owned by user"
+
+  PATCH /api/v1/templates/{template_id}:
+    description: "Update template name."
+    auth: required
+    request:
+      body:
+        name: "string (required)"
+    response:
+      200:
+        template: "TemplateSummary"
+      404:
+        error: "string"
+
+  DELETE /api/v1/templates/{template_id}:
+    description: >
+      Delete a template. The source Draft is NOT deleted (remains in queue
+      with status=approved until manually discarded).
+    auth: required
+    response:
+      204: "no content"
+      404:
+        error: "string"
+
+# ── Background Task Spec ──────────────────────────────────────────────────────
+
+background_task:
+  name: generate_draft_audio
+  trigger: POST /api/v1/drafts (after 201 response)
+  steps:
+    1: "Set draft.status = 'generating'"
+    2: "Call POST /api/v1/tts/voices/design on TTS proxy with {text, instruct, language, format='wav'}"
+    3a_success: "Decode audio_b64 from relay response; compute duration_s; set draft.status='ready', draft.audio_b64=..., draft.duration_s=..."
+    3b_failure: "Set draft.status='failed', draft.error=<error message from relay>"
+  notes:
+    - "Use FastAPI BackgroundTasks (not Celery) at MVP maturity"
+    - "draft.updated_at is refreshed on every status transition so frontend can detect changes"
+    - "If relay is unreachable after 30s timeout, set status=failed"
+
+# ── Dependencies ──────────────────────────────────────────────────────────────
+
+dependencies:
+  - relay-api.yaml       # TTS generation via POST /api/v1/tts/voices/design
+  - characters CRUD      # character_id FK validation
+  - auth (Bearer token)  # from existing auth service
+
+owned_by: draft-service
+consumers: [frontend, voicestudio-ui]
