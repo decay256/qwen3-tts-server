@@ -33,3 +33,6 @@
 {"ts":"2026-03-01T13:05:11Z","agent":"frontend-engineer","action":"complete","issue":"#23","pr":30,"detail":"RunPodQueue component: worker/job breakdown panel, estimated wait, CSS styles. 58 modules build clean."}
 {"ts":"2026-03-01T13:05:11Z","agent":"code-reviewer","action":"start","detail":"Sprint3: reviewing PRs #27 #28 #29 #30"}
 {"ts":"2026-03-01T13:06:40Z","agent":"code-reviewer","action":"review-done","detail":"Reviewed PRs #27 #28 #29 #30. All approved. #29 closed (superseded by #30). Merge order: #27 → #28 → #30"}
+{"ts":"2026-03-01T13:08:36Z","agent":"orchestrator","action":"deploy","detail":"Frontend rebuilt (58 modules, 2.94s). voicestudio.service restarted. Active: running"}
+{"ts":"2026-03-01T13:08:36Z","agent":"qa-engineer","action":"start","detail":"Sprint3: QA verification of all 5 issues DoD"}
+{"ts":"2026-03-01T13:11:50Z","agent":"qa-engineer","action":"complete","detail":"All 5 issues DoD verified: warmup noop live, RunPod maxWorkers=4, RunPodQueue builds, contract v1.2, auto-verify tests pass. 394 tests passing."}
