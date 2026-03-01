@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { apiJson } from '../api/client';
 import { ConnectionStatus } from '../components/ConnectionStatus';
+import { RunPodQueue } from '../components/RunPodQueue';
 import type { Character } from '../api/types';
 
 export function DashboardPage() {
@@ -42,6 +43,7 @@ export function DashboardPage() {
 
       {/* Connection Status */}
       <ConnectionStatus />
+      <RunPodQueue />
 
       <section className="characters-section">
         <div className="section-header">

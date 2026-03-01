@@ -9,7 +9,7 @@ import type { TTSStatus } from '../api/types';
 import { useBackend, type BackendStatus } from '../context/BackendContext';
 
 interface ConnectionInfo {
-  status: 'connected' | 'cold-start' | 'disconnected' | 'error';
+  status: 'connected' | 'cold-start' | 'busy' | 'disconnected' | 'error';
   label: string;
   detail: string;
   canWarm: boolean;
@@ -47,6 +47,19 @@ function parseStatus(s: TTSStatus | null, err?: string): ConnectionInfo {
         status: 'cold-start',
         label: 'RunPod Starting...',
         detail: `${w.initializing} worker${w.initializing !== 1 ? 's' : ''} initializing — will be ready shortly.`,
+        canWarm: false,
+      };
+    }
+
+    if (w && w.running > 0 && w.idle === 0 && w.ready === 0) {
+      // Workers exist but are all processing jobs — queue overflow state
+      const inQueue = s.runpod_health?.jobs?.queued ?? 0;
+      return {
+        status: 'busy',
+        label: `RunPod Busy (${w.running} worker${w.running !== 1 ? 's' : ''} active)`,
+        detail: inQueue > 0
+          ? `All workers processing jobs · ${inQueue} job${inQueue !== 1 ? 's' : ''} in queue`
+          : 'All workers processing jobs · new requests will queue',
         canWarm: false,
       };
     }
@@ -114,12 +127,13 @@ export function ConnectionStatus() {
   const prevStatusRef = useRef<string | null>(null);
   const warmupPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const secondsAgo = useSecondsAgo(lastChecked);
-  const { setStatus: setBackendStatus } = useBackend();
+  const { setStatus: setBackendStatus, setTtsStatus: setContextTtsStatus } = useBackend();
 
   const checkStatus = useCallback(async () => {
     try {
       const s = await apiJson<TTSStatus>('/api/v1/tts/status');
       setTtsStatus(s);
+      setContextTtsStatus(s);
       setFetchError(null);
       return s;
     } catch (e) {
@@ -131,7 +145,7 @@ export function ConnectionStatus() {
     } finally {
       setLastChecked(Date.now());
     }
-  }, []);
+  }, [setContextTtsStatus]);
 
   // Initial fetch on mount
   useEffect(() => { checkStatus(); }, [checkStatus]);
@@ -226,6 +240,7 @@ export function ConnectionStatus() {
   const statusColor = {
     connected: 'var(--success)',
     'cold-start': 'var(--warning)',
+    busy: 'var(--info, #3b82f6)',
     disconnected: 'var(--danger)',
     error: 'var(--danger)',
   }[info.status];
