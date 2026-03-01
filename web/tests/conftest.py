@@ -55,6 +55,13 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 
 @pytest_asyncio.fixture
+async def db_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield the test DB session for direct model manipulation in tests."""
+    async with test_session() as session:
+        yield session
+
+
+@pytest_asyncio.fixture
 async def auth_headers(client: AsyncClient) -> dict:
     """Register a test user and return auth headers."""
     await client.post("/auth/register", json={
