@@ -1,6 +1,6 @@
 /** Character detail — voice editor with presets, casting, and voice library. */
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { apiJson } from '../api/client';
 import { AudioPlayer } from '../components/AudioPlayer';
@@ -165,6 +165,15 @@ export function CharacterPage() {
   });
   const [addingPreset, setAddingPreset] = useState(false);
 
+  // ── Cold-start / generation progress state ──────────────────
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [retryTarget, setRetryTarget] = useState<{ row: PresetRow; op: 'preview' | 'cast' } | null>(null);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortCtrlRef = useRef<AbortController | null>(null);
+  /** True when the 180s hard timeout fired (vs. user-initiated cancel). */
+  const wasTimedOutRef = useRef(false);
+
   /* ── Load data ─────────────────────────────────────────────── */
 
   useEffect(() => {
@@ -204,6 +213,46 @@ export function CharacterPage() {
     setError(detail);
     setTimeout(() => setError(null), 10000);
   };
+
+  /* ── Generation lifecycle helpers ─────────────────────────── */
+
+  /** Start a tracked generation. Returns an AbortController whose signal to pass to fetch. */
+  const startGeneration = useCallback((key: string): AbortController => {
+    const ctrl = new AbortController();
+    abortCtrlRef.current = ctrl;
+    wasTimedOutRef.current = false;
+    setGenerating(key);
+    setElapsedSeconds(0);
+    setRetryTarget(null);
+    setError(null);
+
+    // Tick elapsed counter every second
+    timerRef.current = setInterval(() => {
+      setElapsedSeconds(s => s + 1);
+    }, 1000);
+
+    // Hard timeout at 180s — mark as timeout before aborting so catch block can distinguish
+    timeoutRef.current = setTimeout(() => {
+      wasTimedOutRef.current = true;
+      ctrl.abort();
+    }, 180_000);
+
+    return ctrl;
+  }, []);
+
+  /** Stop a tracked generation (call in finally block). */
+  const stopGeneration = useCallback(() => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+    abortCtrlRef.current = null;
+    setGenerating(null);
+  }, []);
+
+  /** Cancel the in-flight generation request. */
+  const cancelGeneration = useCallback(() => {
+    abortCtrlRef.current?.abort();
+    stopGeneration();
+  }, [stopGeneration]);
 
   /* ── Actions ───────────────────────────────────────────────── */
 
@@ -247,27 +296,35 @@ export function CharacterPage() {
 
   const previewPreset = async (row: PresetRow) => {
     if (!character) return;
-    setGenerating(row.key);
     setPreview(null);
-    setError(null);
+    const ctrl = startGeneration(row.key);
     try {
       const fullInstruct = `${baseDesc}, ${row.instruct}`;
       const result = await apiJson<DesignResult>('/api/v1/tts/voices/design', {
         method: 'POST',
         body: JSON.stringify({ text: row.text, instruct: fullInstruct, format: 'wav' }),
+        signal: ctrl.signal,
       });
       setPreview({ audio: result.audio, format: 'wav', label: `${row.name} (${row.intensity})` });
     } catch (e) {
-      handleError(e, `Preview "${row.name} ${row.intensity}"`);
+      if ((e as Error).name === 'AbortError') {
+        if (wasTimedOutRef.current) {
+          // Hard 180s timeout fired
+          setError(`Preview timed out after 3 minutes. GPU may still be starting — try again.`);
+          setRetryTarget({ row, op: 'preview' });
+        }
+        // User-initiated cancel — stay silent
+      } else {
+        handleError(e, `Preview "${row.name} ${row.intensity}"`);
+      }
     } finally {
-      setGenerating(null);
+      stopGeneration();
     }
   };
 
   const castSingle = async (row: PresetRow) => {
     if (!character) return;
-    setGenerating(row.key + '_cast');
-    setError(null);
+    const ctrl = startGeneration(row.key + '_cast');
     try {
       const fullInstruct = `${baseDesc}, ${row.instruct}`;
       const promptName = `${character.name.toLowerCase()}_${row.key}`;
@@ -281,13 +338,22 @@ export function CharacterPage() {
           prompt_name: promptName,
           tags: [row.name, row.intensity, ...(row.type === 'mode' ? ['mode'] : ['emotion'])],
         }),
+        signal: ctrl.signal,
       });
       setPreview({ audio: result.audio, format: 'wav', label: `${row.name} (${row.intensity}) — saved as clone prompt` });
       loadPrompts();
     } catch (e) {
-      handleError(e, `Cast "${row.name} ${row.intensity}"`);
+      if ((e as Error).name === 'AbortError') {
+        if (wasTimedOutRef.current) {
+          setError(`Cast timed out after 3 minutes. GPU may still be starting — try again.`);
+          setRetryTarget({ row, op: 'cast' });
+        }
+        // User-initiated cancel — stay silent
+      } else {
+        handleError(e, `Cast "${row.name} ${row.intensity}"`);
+      }
     } finally {
-      setGenerating(null);
+      stopGeneration();
     }
   };
 
@@ -519,8 +585,25 @@ export function CharacterPage() {
 
       {/* Error banner */}
       {error && (
-        <div className="flash error" style={{ cursor: 'pointer' }} onClick={() => setError(null)}>
-          ⚠️ {error}
+        <div className="flash error">
+          <span>⚠️ {error}</span>
+          <div className="flash-actions">
+            {retryTarget && (
+              <button
+                className="btn-sm btn-retry"
+                onClick={() => {
+                  const { row, op } = retryTarget;
+                  setRetryTarget(null);
+                  setError(null);
+                  if (op === 'preview') previewPreset(row);
+                  else castSingle(row);
+                }}
+              >
+                ↩ Retry
+              </button>
+            )}
+            <button className="btn-sm btn-dismiss" onClick={() => { setError(null); setRetryTarget(null); }}>✕</button>
+          </div>
         </div>
       )}
 
@@ -624,7 +707,7 @@ export function CharacterPage() {
               const isRefining = refineKey === row.key;
 
               return (
-                <div key={row.key} className={`preset-row ${isExpanded ? 'expanded' : ''} ${hasPrompt ? 'has-prompt' : ''} ${!row.is_builtin ? 'custom-preset' : ''}`}>
+                <div key={row.key} className={`preset-row ${isExpanded ? 'expanded' : ''} ${hasPrompt ? 'has-prompt' : ''} ${!row.is_builtin ? 'custom-preset' : ''} ${isGenerating ? 'generating' : ''}`}>
                   {/* Compact header */}
                   <div className="preset-header" onClick={() => setExpanded(isExpanded ? null : row.key)}>
                     <div className="preset-label">
@@ -665,6 +748,26 @@ export function CharacterPage() {
                       <span className="expand-icon">{isExpanded ? '▼' : '▶'}</span>
                     </div>
                   </div>
+
+                  {/* Generating status bar */}
+                  {isGenerating && (
+                    <div className="generating-status">
+                      <div className="generating-timer">
+                        <span className="spinner-dot" />
+                        Generating... ({elapsedSeconds}s)
+                        {elapsedSeconds > 15 && (
+                          <span className="cold-start-msg"> — GPU starting up, this may take up to 2 minutes…</span>
+                        )}
+                      </div>
+                      <button
+                        className="btn-sm btn-cancel"
+                        onClick={e => { e.stopPropagation(); cancelGeneration(); }}
+                        title="Cancel request"
+                      >
+                        ✕ Cancel
+                      </button>
+                    </div>
+                  )}
 
                   {/* Expanded editor */}
                   {isExpanded && (

@@ -273,7 +273,30 @@ section h3 { margin-bottom: 12px; font-size: 16px; }
 /* Flash messages */
 .flash { padding: 10px 14px; border-radius: var(--radius); margin-bottom: 16px; font-size: 14px; }
 .flash.success { background: rgba(34, 197, 94, 0.1); color: var(--success); border: 1px solid var(--success); }
-.flash.error { background: rgba(239, 68, 68, 0.1); color: var(--danger); border: 1px solid var(--danger); }
+.flash.error {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.flash-actions { display: flex; gap: 6px; align-items: center; flex-shrink: 0; }
+.btn-retry {
+  background: var(--danger);
+  color: white;
+  border: none;
+  white-space: nowrap;
+}
+.btn-retry:hover { background: #dc2626; }
+.btn-dismiss {
+  background: transparent;
+  color: var(--danger);
+  border: 1px solid var(--danger);
+  white-space: nowrap;
+}
 
 code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; font-size: 13px; font-family: 'JetBrains Mono', monospace; }
 
@@ -644,5 +667,108 @@ code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; f
 
   textarea, input {
     font-size: 16px; /* prevents iOS zoom on focus */
+  }
+}
+
+/* ── Cold-start / generation progress ──────────────────────────── */
+
+@keyframes preset-pulse {
+  0%   { border-color: var(--accent); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4); }
+  50%  { border-color: var(--accent-hover); box-shadow: 0 0 0 4px rgba(99, 102, 241, 0); }
+  100% { border-color: var(--accent); box-shadow: 0 0 0 0 rgba(99, 102, 241, 0); }
+}
+
+.preset-row.generating {
+  border-color: var(--accent);
+  animation: preset-pulse 1.8s ease-in-out infinite;
+}
+
+/* Generating status bar — shown below preset-header while generating */
+.generating-status {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(99, 102, 241, 0.07);
+  border-top: 1px solid rgba(99, 102, 241, 0.25);
+  font-size: 13px;
+  color: var(--text-dim);
+  flex-wrap: wrap;
+}
+
+.generating-timer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* Pulsing dot indicator */
+@keyframes dot-pulse {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0.2; }
+}
+.spinner-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--accent);
+  flex-shrink: 0;
+  animation: dot-pulse 1.2s ease-in-out infinite;
+}
+
+.cold-start-msg {
+  color: var(--warning);
+  font-size: 12px;
+  font-style: italic;
+}
+
+.btn-cancel {
+  background: transparent;
+  color: var(--text-dim);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.btn-cancel:hover {
+  background: rgba(239, 68, 68, 0.12);
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* Mobile: generating-status stacks gracefully */
+@media (max-width: 768px) {
+  .generating-status {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+
+  .generating-timer {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .cold-start-msg {
+    display: block;
+    margin-top: 2px;
+  }
+
+  .btn-cancel {
+    align-self: flex-end;
+    padding: 6px 14px;
+    font-size: 12px;
+  }
+
+  .flash.error {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  .flash-actions {
+    align-self: flex-end;
   }
 }
