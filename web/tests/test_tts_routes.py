@@ -57,11 +57,49 @@ async def test_synthesize_requires_auth(client: AsyncClient):
 
 @pytest.mark.asyncio
 async def test_status_proxies_to_relay(client: AsyncClient, auth_headers: dict):
-    with mock_tts_get({"status": "ok", "tunnel": True}) as m:
+    # Proxy must call /api/v1/tts/status (the frontend-designed endpoint that
+    # returns runpod_configured/runpod_available). Calling the older /api/v1/status
+    # omitted those fields before commit 530c0c2, causing "No GPU Backend" even
+    # when RunPod was configured.
+    relay_payload = {
+        "status": "ok",
+        "tunnel_connected": False,
+        "models_loaded": [],
+        "prompts_count": 0,
+        "runpod_configured": True,
+        "runpod_available": True,
+    }
+    with mock_tts_get(relay_payload) as m:
         resp = await client.get("/api/v1/tts/status", headers=auth_headers)
     assert resp.status_code == 200
-    assert resp.json()["status"] == "ok"
-    m.assert_called_once_with("/api/v1/status")
+    body = resp.json()
+    assert body["status"] == "ok"
+    assert body["runpod_configured"] is True
+    assert body["runpod_available"] is True
+    m.assert_called_once_with("/api/v1/tts/status")
+
+
+@pytest.mark.asyncio
+async def test_status_degraded_when_relay_unreachable(client: AsyncClient, auth_headers: dict):
+    """When relay is down, status returns degraded response with runpod_configured=False.
+
+    This ensures the frontend shows 'No GPU Backend' (not an unhandled error)
+    and doesn't incorrectly imply RunPod is configured when the relay is
+    unreachable (fixing the missing runpod_configured key in the error fallback).
+    """
+    from web.app.services.tts_proxy import TTSRelayError
+
+    error = TTSRelayError(502, "Cannot connect to TTS relay — server may be down")
+    with patch(f"{PROXY_MODULE}.tts_get", new_callable=AsyncMock, side_effect=error):
+        resp = await client.get("/api/v1/tts/status", headers=auth_headers)
+
+    assert resp.status_code == 200  # status endpoint never returns 5xx — returns degraded payload
+    body = resp.json()
+    assert body["status"] == "error"
+    assert body["tunnel_connected"] is False
+    assert body["runpod_configured"] is False   # must be present so frontend shows "No GPU Backend"
+    assert body["runpod_available"] is False
+    assert "error" in body
 
 
 @pytest.mark.asyncio

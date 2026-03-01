@@ -26,14 +26,22 @@ def _relay_or_raise(e: TTSRelayError):
 async def get_status(user: User = Depends(get_current_user)):
     """Get TTS server status (GPU connection, models loaded, etc.)."""
     try:
-        return await tts_proxy.tts_get("/api/v1/status")
+        # Use /api/v1/tts/status — the endpoint designed for the frontend.
+        # It returns a flat merged response including models_loaded, prompts_count,
+        # runpod_configured, and runpod_available (unlike the older /api/v1/status
+        # which omitted RunPod fields before commit 530c0c2 and caused the
+        # frontend to show "No GPU Backend" even when RunPod was configured).
+        return await tts_proxy.tts_get("/api/v1/tts/status")
     except TTSRelayError as e:
-        # Return degraded status instead of error for the status endpoint
+        # Return degraded status instead of error for the status endpoint.
+        # Include runpod_configured: False explicitly so the frontend knows
+        # RunPod is also unavailable (not just tunnel-down).
         return {
             "status": "error",
             "tunnel_connected": False,
             "models_loaded": [],
             "prompts_count": 0,
+            "runpod_configured": False,
             "runpod_available": False,
             "error": e.detail,
         }
