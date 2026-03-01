@@ -54,11 +54,19 @@ flowchart LR
 
 ## Active Sprint
 
-**No active sprint** — Sprint 3 completed 2026-03-01. Awaiting PO to propose Sprint 4 backlog.
+**No active sprint** — Sprint 4 completed 2026-03-01. Awaiting PO to propose Sprint 5 backlog.
 
 ---
 
 ## Completed Sprints
+
+### Sprint 4: Draft Workflow & Character Templates (2026-03-01) ✅ DONE
+- **Goal:** User can generate voice drafts, queue them, review audio, approve best → character templates
+- **DoD:** Generate Draft → queue → audio → Approve → Template visible in Templates tab
+- **Proposal:** `docs/sprint4-proposal.md`
+- **Review:** `docs/sprint4-review.md`
+- **Issues:** #34 ✅, #31 ✅, #32 ✅, #33 ✅ (13 points — 100%)
+- **PRs merged:** #35 (contract), #36 (backend), #37 (frontend)
 
 ### Sprint 3: Worker Management & Queue Visibility (2026-03-01) ✅ DONE
 - **Goal:** Warmup idempotent → autoscaler capped at 4 workers → queue visibility → busy state
