@@ -1,4 +1,4 @@
-version: "1.1"
+version: "1.2"
 component: relay
 maturity: mvp
 description: REST API relay that routes TTS requests to GPU backends (local tunnel or RunPod fallback).
@@ -11,21 +11,38 @@ schemas:
       Raw response from the RunPod /health endpoint. Returned as `runpod_health`
       in status responses when RunPod is configured. Based on RunPod serverless
       health API v2.
-    fields:
-      workers:
-        ready: "int — workers currently ready to accept jobs"
-        idle: "int — workers warmed up but not yet assigned a job"
-        initializing: "int — workers starting up (cold-start in progress)"
-        running: "int — workers actively executing a job"
-        throttled: "int — workers throttled by RunPod platform"
-        unhealthy: "int — workers in an unhealthy state"
-      jobs:
-        queued: "int — jobs waiting for a worker"
-        inProgress: "int — jobs currently being executed"
-        completed: "int — jobs completed successfully"
-        failed: "int — jobs that failed"
-        retried: "int — jobs that were retried"
-        badfailed: "int — jobs that failed and cannot be retried"
+      Two variants exist: the normal health object (workers/jobs fields) and an
+      error object (returned when the relay cannot reach RunPod — the frontend
+      must handle both shapes).
+    variants:
+      normal:
+        fields:
+          workers:
+            ready: "int — workers currently ready to accept jobs"
+            idle: "int — workers warmed up but not yet assigned a job"
+            initializing: "int — workers starting up (cold-start in progress)"
+            running: "int — workers actively executing a job"
+            throttled: "int — workers throttled by RunPod platform"
+            unhealthy: "int — workers in an unhealthy state"
+          jobs:
+            queued: "int — jobs waiting for a worker"
+            inProgress: "int — jobs currently being executed"
+            completed: "int — jobs completed successfully"
+            failed: "int — jobs that failed"
+            retried: "int — jobs that were retried"
+            badfailed: "int — jobs that failed and cannot be retried"
+      error:
+        description: >
+          Returned when _get_runpod_status() raises an exception (network error,
+          auth failure, RunPod API unreachable). In this case the workers and jobs
+          fields are absent and only the error field is present.
+        fields:
+          error: "string — error message from the exception"
+    notes:
+      - "Frontend must check for the presence of the 'workers' key before accessing worker counts"
+      - "The error variant means runpod_available will be false in the parent TTSStatus"
+      - "Endpoint configured with maxWorkers=4 — autoscaler caps at 4 concurrent workers"
+      - "Jobs exceeding worker capacity are queued (jobs.queued > 0) rather than rejected"
 
   TTSStatus:
     description: >
@@ -78,13 +95,19 @@ endpoints:
       Trigger RunPod worker scale-up (fire-and-forget). Submits a minimal job
       to RunPod to cause a worker to initialise. Returns immediately.
       Callers should poll GET /api/v1/tts/status to track readiness.
-      Added Sprint 1.
+      Idempotent: if workers are already idle/ready, returns status=noop immediately
+      without submitting a new job (avoids spawning duplicate workers).
+      Added Sprint 1. Updated Sprint 3 (#22).
     auth: required (Bearer token)
     request: "{} (empty body)"
     response:
       200 (already connected):
         status: "connected"
         message: "string — 'GPU tunnel is already connected'"
+      200 (noop — workers already ready):
+        status: "noop"
+        message: "string — 'Workers already ready/idle — no warmup needed'"
+        workers_ready: "int — count of idle+ready workers at time of check"
       200 (warming):
         status: "warming"
         message: "string — 'RunPod worker requested'"
@@ -183,6 +206,10 @@ consumers: [web-backend, external-clients]
 # ── Changelog ─────────────────────────────────────────────────────────────────
 
 changelog:
+  "1.2":
+    - "Added RunPodHealth error variant (Sprint 3 — issue #24)"
+    - "Documented warmup idempotency: noop response when workers already ready (Sprint 3 — issue #22)"
+    - "Added autoscaler notes: maxWorkers=4, queue overflow behavior (Sprint 3 — issue #23)"
   "1.1":
     - "Added GET /api/v1/tts/status (Sprint 1 — issue #18)"
     - "Added POST /api/v1/tts/warmup (Sprint 1 — issue #18)"
