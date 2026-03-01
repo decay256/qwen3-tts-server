@@ -446,6 +446,25 @@ class RemoteRelay:
                 status=503,
             )
 
+        # Idempotency check: if workers are already idle/ready, skip the warmup job.
+        # This prevents RunPod from spinning up additional workers unnecessarily.
+        _, runpod_health = await self._get_runpod_status()
+        if isinstance(runpod_health, dict) and "workers" in runpod_health:
+            workers = runpod_health["workers"]
+            workers_ready = workers.get("idle", 0) + workers.get("ready", 0)
+            if workers_ready > 0:
+                logger.info(
+                    "Warmup noop: %d worker(s) already idle/ready — skipping job submission",
+                    workers_ready,
+                )
+                return web.json_response(
+                    {
+                        "status": "noop",
+                        "message": "Workers already ready/idle — no warmup needed",
+                        "workers_ready": workers_ready,
+                    }
+                )
+
         # Fire-and-forget: submit a cheap status job so RunPod allocates a worker.
         try:
             job_id = await self.runpod.run_async("/api/v1/status", {})

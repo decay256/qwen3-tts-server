@@ -54,7 +54,12 @@ flowchart LR
 
 ## Active Sprint
 
-**No active sprint** — awaiting PO to propose Sprint 3 backlog.
+**Sprint 3: Worker Management & Queue Visibility** (2026-03-01)
+- **Milestone:** sprint-20260301 (#3)
+- **Goal:** Warmup idempotent → autoscaler capped at 4 → queue page → busy state
+- **Issues:** #22 (warmup), #23 (autoscaler+queue), #24 (contract), #25 (busy state), #26 (auto-verify)
+- **Points:** 11
+- **Phase:** KICKOFF complete → running ARCHITECT → BUILD
 
 ---
 
