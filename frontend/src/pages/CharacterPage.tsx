@@ -5,6 +5,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { apiJson } from '../api/client';
 import { AudioPlayer } from '../components/AudioPlayer';
 import { ConnectionStatus } from '../components/ConnectionStatus';
+import { useBackend, backendReady } from '../context/BackendContext';
 import type { Character, VoicePrompt, DesignResult, RefineResult } from '../api/types';
 
 /* ── Types ──────────────────────────────────────────────────────── */
@@ -124,6 +125,11 @@ function flattenPresets(presets: PresetsResponse): PresetRow[] {
 export function CharacterPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+
+  // GPU backend availability — read from shared BackendContext (populated by ConnectionStatus)
+  const { status: backendStatus } = useBackend();
+  const gpuAvailable = backendReady(backendStatus);
+  const noGpuTooltip = 'No GPU backend available — connect tunnel or wait for RunPod';
 
   const [character, setCharacter] = useState<Character | null>(null);
   const [baseDesc, setBaseDesc] = useState('');
@@ -577,6 +583,14 @@ export function CharacterPage() {
             </div>
           )}
 
+          {/* No-GPU warning banner */}
+          {!gpuAvailable && backendStatus !== 'checking' && (
+            <div className="no-gpu-warning">
+              ⚠️ No GPU backend available — Preview and Cast are disabled.
+              Connect the GPU tunnel or wait for RunPod to become ready.
+            </div>
+          )}
+
           <div className="presets-toolbar">
             <div className="filter-group">
               <button className={`btn-filter ${filter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
@@ -591,7 +605,12 @@ export function CharacterPage() {
               <button onClick={() => setShowAddModal(true)} className="btn-secondary" title="Create a new custom preset">
                 ＋ Add Preset
               </button>
-              <button onClick={castAll} disabled={castingAll} className="btn-primary" title="Generate and save all emotion/mode variants as clone prompts">
+              <button
+                onClick={castAll}
+                disabled={castingAll || !gpuAvailable}
+                className="btn-primary"
+                title={!gpuAvailable ? noGpuTooltip : 'Generate and save all emotion/mode variants as clone prompts'}
+              >
                 {castingAll ? castProgress : '🎭 Cast All Presets'}
               </button>
             </div>
@@ -619,17 +638,17 @@ export function CharacterPage() {
                     <div className="preset-actions-compact">
                       <button
                         onClick={e => { e.stopPropagation(); previewPreset(row); }}
-                        disabled={isGenerating}
+                        disabled={isGenerating || !gpuAvailable}
                         className="btn-sm"
-                        title="Preview — generate a one-off sample (VoiceDesign, not saved)"
+                        title={!gpuAvailable ? noGpuTooltip : 'Preview — generate a one-off sample (VoiceDesign, not saved)'}
                       >
                         {isGenerating && generating === row.key ? '⏳' : '▶ Preview'}
                       </button>
                       <button
                         onClick={e => { e.stopPropagation(); castSingle(row); }}
-                        disabled={isGenerating}
+                        disabled={isGenerating || !gpuAvailable}
                         className="btn-sm btn-cast"
-                        title="Cast — generate and save as reusable clone prompt"
+                        title={!gpuAvailable ? noGpuTooltip : 'Cast — generate and save as reusable clone prompt'}
                       >
                         {isGenerating && generating === row.key + '_cast' ? '⏳' : '💾 Cast'}
                       </button>
@@ -675,10 +694,20 @@ export function CharacterPage() {
                       )}
 
                       <div className="editor-actions">
-                        <button onClick={() => previewPreset(row)} disabled={!!generating} className="btn-primary btn-sm">
+                        <button
+                          onClick={() => previewPreset(row)}
+                          disabled={!!generating || !gpuAvailable}
+                          className="btn-primary btn-sm"
+                          title={!gpuAvailable ? noGpuTooltip : undefined}
+                        >
                           {generating === row.key ? '⏳ Generating...' : '🔊 Preview'}
                         </button>
-                        <button onClick={() => castSingle(row)} disabled={!!generating} className="btn-secondary btn-sm">
+                        <button
+                          onClick={() => castSingle(row)}
+                          disabled={!!generating || !gpuAvailable}
+                          className="btn-secondary btn-sm"
+                          title={!gpuAvailable ? noGpuTooltip : undefined}
+                        >
                           💾 Cast & Save
                         </button>
                         <button
@@ -889,9 +918,9 @@ export function CharacterPage() {
                       <div className="prompt-actions">
                         <button
                           onClick={() => playPrompt(p.name)}
-                          disabled={generating === p.name}
+                          disabled={generating === p.name || !gpuAvailable}
                           className="btn-sm"
-                          title="Synthesize test text using this clone prompt"
+                          title={!gpuAvailable ? noGpuTooltip : 'Synthesize test text using this clone prompt'}
                         >
                           {generating === p.name ? '⏳' : '▶ Play'}
                         </button>

@@ -8,3 +8,4 @@
 {"ts":"2026-02-28T22:48:30Z","agent":"frontend-preset-crud","action":"frontend_component","detail":"Updated CharacterPage.tsx — modal, savePreset, deletePreset, createPreset, is_builtin badge, delete btn for custom, dynamic counts"}
 {"ts":"2026-02-28T22:49:00Z","agent":"frontend-preset-crud","action":"frontend_css","detail":"Updated App.css — modal overlay/card, custom-preset border, .badge.custom style, mobile responsive modal"}
 {"ts":"2026-02-28T22:49:30Z","agent":"frontend-preset-crud","action":"build","detail":"npm run build succeeded — 3.57s, 0 type errors"}
+{"ts":"2026-03-01T07:46:00Z","agent":"frontend-engineer","task":"status-polling","status":"done","detail":"Added auto-polling to ConnectionStatus: 30s interval when disconnected/cold, 60s when connected. Added last-checked indicator, ↻ Refresh button, flash animation on status transition. Build passes. Branch: feature/status-polling."}

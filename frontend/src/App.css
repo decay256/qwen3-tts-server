@@ -409,9 +409,51 @@ code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; f
   border-radius: var(--radius);
   border: 1px solid var(--border);
   margin-bottom: 16px;
+  transition: background 0.3s;
 }
-.conn-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; font-size: 14px; }
+.conn-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
 .conn-detail { font-size: 13px; color: var(--text-dim); }
+.conn-last-checked {
+  font-size: 11px;
+  color: var(--text-dim);
+  margin-top: 4px;
+  opacity: 0.7;
+}
+.conn-refresh {
+  margin-left: auto;
+  padding: 2px 8px;
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* Flash animation when status transitions */
+@keyframes conn-flash {
+  0%   { background: var(--surface); }
+  20%  { background: rgba(99, 102, 241, 0.18); }
+  100% { background: var(--surface); }
+}
+.conn-flash {
+  animation: conn-flash 1.5s ease-out forwards;
+}
+
+/* No GPU backend warning — shown at top of presets/library tabs */
+.no-gpu-warning {
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.35);
+  border-left: 3px solid var(--danger);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  font-size: 13px;
+  color: var(--danger);
+  margin-bottom: 16px;
+  line-height: 1.5;
+}
 
 /* Info boxes */
 .info-box {

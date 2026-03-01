@@ -10,12 +10,14 @@ import { DashboardPage } from './pages/DashboardPage';
 import { CharacterPage } from './pages/CharacterPage';
 import { AccountPage } from './pages/AccountPage';
 import { ConfigPage } from './pages/ConfigPage';
+import { BackendProvider } from './context/BackendContext';
 import './App.css';
 
 function App() {
   const { loggedIn, login, register, logout, error, loading } = useAuth();
 
   return (
+    <BackendProvider>
     <BrowserRouter>
       <Routes>
         {/* Public routes */}
@@ -40,6 +42,7 @@ function App() {
         )}
       </Routes>
     </BrowserRouter>
+    </BackendProvider>
   );
 }
 
