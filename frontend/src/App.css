@@ -773,3 +773,79 @@ code { background: var(--surface-hover); padding: 2px 6px; border-radius: 4px; f
     align-self: flex-end;
   }
 }
+
+/* ── RunPodQueue (Sprint 3 #23) ─────────────────────────────────── */
+.runpod-queue {
+  margin-top: 6px;
+  font-size: 13px;
+}
+
+.queue-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--text-dim);
+  cursor: pointer;
+}
+
+.queue-badge {
+  background: var(--warning);
+  color: #000;
+  border-radius: 10px;
+  padding: 1px 7px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.queue-badge-ok {
+  background: var(--surface-raised);
+  color: var(--text-dim);
+}
+
+.queue-details {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: var(--surface-raised);
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.queue-section {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.queue-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 2px;
+}
+
+.queue-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px 0;
+}
+
+.queue-label { color: var(--text-dim); }
+.queue-count { font-weight: 600; min-width: 24px; text-align: right; }
+
+.queue-wait {
+  font-size: 12px;
+  color: var(--text-dim);
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.queue-wait-note {
+  font-size: 10px;
+  opacity: 0.6;
+}
