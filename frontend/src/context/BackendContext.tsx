@@ -11,6 +11,7 @@ export type BackendStatus =
   | 'checking'      // initial state before first poll completes
   | 'connected'     // GPU tunnel up
   | 'cold-start'    // RunPod configured/available but tunnel down
+  | 'busy'          // RunPod workers all running, none idle — jobs will queue
   | 'disconnected'  // no tunnel, no RunPod
   | 'error';        // fetch error
 
