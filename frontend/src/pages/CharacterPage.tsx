@@ -166,6 +166,9 @@ export function CharacterPage() {
   const [addingPreset, setAddingPreset] = useState(false);
 
   // ── Cold-start / generation progress state ──────────────────
+  const GENERATION_TIMEOUT_MS = 180_000;
+  const COLD_START_THRESHOLD_S = 15;
+
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [retryTarget, setRetryTarget] = useState<{ row: PresetRow; op: 'preview' | 'cast' } | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -216,8 +219,20 @@ export function CharacterPage() {
 
   /* ── Generation lifecycle helpers ─────────────────────────── */
 
+  /** Stop a tracked generation (call in finally block). */
+  const stopGeneration = useCallback(() => {
+    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
+    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
+    abortCtrlRef.current = null;
+    setGenerating(null);
+  }, []);
+
   /** Start a tracked generation. Returns an AbortController whose signal to pass to fetch. */
   const startGeneration = useCallback((key: string): AbortController => {
+    // Abort any previous in-flight request
+    abortCtrlRef.current?.abort();
+    stopGeneration();
+
     const ctrl = new AbortController();
     abortCtrlRef.current = ctrl;
     wasTimedOutRef.current = false;
@@ -231,27 +246,27 @@ export function CharacterPage() {
       setElapsedSeconds(s => s + 1);
     }, 1000);
 
-    // Hard timeout at 180s — mark as timeout before aborting so catch block can distinguish
+    // Hard timeout — mark as timeout before aborting so catch block can distinguish
     timeoutRef.current = setTimeout(() => {
       wasTimedOutRef.current = true;
       ctrl.abort();
-    }, 180_000);
+    }, GENERATION_TIMEOUT_MS);
 
     return ctrl;
-  }, []);
-
-  /** Stop a tracked generation (call in finally block). */
-  const stopGeneration = useCallback(() => {
-    if (timerRef.current) { clearInterval(timerRef.current); timerRef.current = null; }
-    if (timeoutRef.current) { clearTimeout(timeoutRef.current); timeoutRef.current = null; }
-    abortCtrlRef.current = null;
-    setGenerating(null);
-  }, []);
+  }, [stopGeneration]);
 
   /** Cancel the in-flight generation request. */
   const cancelGeneration = useCallback(() => {
     abortCtrlRef.current?.abort();
     stopGeneration();
+  }, [stopGeneration]);
+
+  // ── Cleanup on unmount — stop timers and abort any in-flight request ──
+  useEffect(() => {
+    return () => {
+      stopGeneration();
+      abortCtrlRef.current?.abort();
+    };
   }, [stopGeneration]);
 
   /* ── Actions ───────────────────────────────────────────────── */
@@ -324,6 +339,7 @@ export function CharacterPage() {
 
   const castSingle = async (row: PresetRow) => {
     if (!character) return;
+    setPreview(null);
     const ctrl = startGeneration(row.key + '_cast');
     try {
       const fullInstruct = `${baseDesc}, ${row.instruct}`;
@@ -755,7 +771,7 @@ export function CharacterPage() {
                       <div className="generating-timer">
                         <span className="spinner-dot" />
                         Generating... ({elapsedSeconds}s)
-                        {elapsedSeconds > 15 && (
+                        {elapsedSeconds > COLD_START_THRESHOLD_S && (
                           <span className="cold-start-msg"> — GPU starting up, this may take up to 2 minutes…</span>
                         )}
                       </div>
