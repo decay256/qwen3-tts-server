@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from web.app.core.config import settings
 from web.app.core.database import init_db
-from web.app.routes import account, auth, characters, config, presets, tts
+from web.app.routes import account, auth, characters, config, drafts, presets, templates, tts
 from web.app.services.tts_proxy import close_client
 
 logging.basicConfig(level=logging.DEBUG if settings.debug else logging.INFO)
@@ -53,6 +53,8 @@ app.include_router(characters.router)
 app.include_router(config.router)
 app.include_router(presets.router)
 app.include_router(tts.router)
+app.include_router(drafts.router)
+app.include_router(templates.router)
 
 
 @app.get("/health")
